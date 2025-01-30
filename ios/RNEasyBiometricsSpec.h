@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef RCT_NEW_ARCH_ENABLED
-#import <ReactCommon/RCTTurboModule.h>
+#import "RCTTurboModule.h"
 
 namespace facebook
 {
