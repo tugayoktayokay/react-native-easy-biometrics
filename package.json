@@ -1,7 +1,7 @@
 {
   "name": "react-native-easy-biometrics",
-  "version": "1.5.3",
-  "description": "test",
+  "version": "2.1.0",
+  "description": "Easy-to-use biometric authentication for React Native — Face ID, Touch ID, Fingerprint with typed errors, crypto keys, AbortSignal cancel, React Hook, and Expo support. New Architecture (TurboModules) ready.",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
   "types": "lib/typescript/index.d.ts",
@@ -13,6 +13,7 @@
     "android",
     "ios",
     "cpp",
+    "app.plugin.js",
     "react-native-easy-biometrics.podspec",
     "!lib/typescript/example",
     "!android/build",
@@ -33,7 +34,17 @@
   "keywords": [
     "react-native",
     "ios",
-    "android"
+    "android",
+    "biometrics",
+    "faceid",
+    "touchid",
+    "fingerprint",
+    "authentication",
+    "keychain",
+    "keystore",
+    "expo",
+    "new-architecture",
+    "turbomodules"
   ],
   "repository": "https://github.com/tugayoktayokay/react-native-easy-biometrics",
   "author": "tugayoktayokay <mobile@tugayoktayokay.com> (https://github.com/tugayoktayokay)",

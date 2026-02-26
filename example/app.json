@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Easy Biometrics Demo",
+    "slug": "easy-biometrics-demo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tugayoktayokay.easybiometricsexample",
+      "appleTeamId": "QS2YCK3J3E",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Allow the app to use Face ID for biometric authentication demo"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.tugayoktayokay.easybiometricsexample"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "react-native-easy-biometrics",
+      "expo-asset"
+    ]
+  }
+}

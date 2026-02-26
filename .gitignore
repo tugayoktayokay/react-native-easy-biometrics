@@ -40,12 +40,11 @@ project.xcworkspace
 local.properties
 android.iml
 
-# Cocoapods
-#
-example/ios/Pods
-
-# Ruby
-example/vendor/
+# Example app (keep source, exclude generated/build artifacts)
+example/node_modules/
+example/ios/
+example/android/
+example/.expo/
 
 # node.js
 #

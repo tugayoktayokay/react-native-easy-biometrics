@@ -2,66 +2,451 @@
 
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <React/RCTConvert.h>
+#import <Security/Security.h>
 
 #ifdef RCT_NEW_ARCH_ENABLED
 #import "RNEasyBiometricsSpec.h"
 #endif
 
+static NSString *const kKeychainTagPrefix = @"com.easybiometrics.keys.";
+
 @implementation EasyBiometrics
 RCT_EXPORT_MODULE()
 
-RCT_REMAP_METHOD(canAuthenticate,
-                 canAuthenticateWithResolver:(RCTPromiseResolveBlock)resolve
-                 rejecter:(RCTPromiseRejectBlock)reject)
-{
-    LAContext *context = [[LAContext alloc] init];
-    NSError *la_error = nil;
-    BOOL canEvaluatePolicy = [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics error:&la_error];
+// ─── Helper: Build keychain tag from alias ─────────────────────
 
-    if (canEvaluatePolicy) {
-        resolve(@(YES));
-    } else {
-        resolve(@(NO));
-    }
+- (NSData *)keychainTagForAlias:(NSString *)alias {
+  NSString *tag =
+      [kKeychainTagPrefix stringByAppendingString:(alias ?: @"default")];
+  return [tag dataUsingEncoding:NSUTF8StringEncoding];
 }
 
-RCT_REMAP_METHOD(requestBioAuth,
-                 title:(NSString *)title
-                 subtitle:(NSString *)subtitle
-                 requestBioAuthWithResolver:(RCTPromiseResolveBlock)resolve
-                 rejecter:(RCTPromiseRejectBlock)reject)
-{
+// ─── canAuthenticate ───────────────────────────────────────────
 
-    dispatch_async(dispatch_get_global_queue( DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *promptMessage = subtitle;
+RCT_REMAP_METHOD(canAuthenticate,
+                 canAuthenticateWithResolver : (RCTPromiseResolveBlock)
+                     resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  LAContext *context = [[LAContext alloc] init];
+  NSError *la_error = nil;
+  BOOL canEvaluatePolicy =
+      [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics
+                           error:&la_error];
 
+  if (canEvaluatePolicy) {
+    resolve(@(YES));
+  } else {
+    resolve(@(NO));
+  }
+}
+
+// ─── getBiometryType ───────────────────────────────────────────
+
+RCT_REMAP_METHOD(getBiometryType,
+                 getBiometryTypeWithResolver : (RCTPromiseResolveBlock)
+                     resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  LAContext *context = [[LAContext alloc] init];
+  NSError *la_error = nil;
+  BOOL canEvaluatePolicy =
+      [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics
+                           error:&la_error];
+
+  NSString *biometryType = @"None";
+  BOOL available = NO;
+  NSString *errorMsg = nil;
+
+  if (canEvaluatePolicy) {
+    available = YES;
+    if (@available(iOS 11.0, *)) {
+      switch (context.biometryType) {
+      case LABiometryTypeFaceID:
+        biometryType = @"FaceID";
+        break;
+      case LABiometryTypeTouchID:
+        biometryType = @"TouchID";
+        break;
+      default:
+        biometryType = @"None";
+        break;
+      }
+    } else {
+      biometryType = @"TouchID";
+    }
+  } else if (la_error) {
+    errorMsg = la_error.localizedDescription;
+    if (@available(iOS 11.0, *)) {
+      switch (context.biometryType) {
+      case LABiometryTypeFaceID:
+        biometryType = @"FaceID";
+        break;
+      case LABiometryTypeTouchID:
+        biometryType = @"TouchID";
+        break;
+      default:
+        break;
+      }
+    }
+  }
+
+  NSDictionary *result = @{
+    @"available" : @(available),
+    @"biometryType" : biometryType,
+  };
+
+  if (errorMsg) {
+    NSMutableDictionary *mutableResult = [result mutableCopy];
+    mutableResult[@"error"] = errorMsg;
+    resolve(mutableResult);
+  } else {
+    resolve(result);
+  }
+}
+
+// ─── isEnrolled ────────────────────────────────────────────────
+
+RCT_REMAP_METHOD(isEnrolled,
+                 isEnrolledWithResolver : (RCTPromiseResolveBlock)
+                     resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  LAContext *context = [[LAContext alloc] init];
+  NSError *la_error = nil;
+  BOOL canEvaluatePolicy =
+      [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics
+                           error:&la_error];
+
+  if (canEvaluatePolicy) {
+    resolve(@(YES));
+  } else {
+    resolve(@(NO));
+  }
+}
+
+// ─── getSecurityLevel ──────────────────────────────────────────
+
+RCT_REMAP_METHOD(getSecurityLevel,
+                 getSecurityLevelWithResolver : (RCTPromiseResolveBlock)
+                     resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  LAContext *context = [[LAContext alloc] init];
+  NSError *la_error = nil;
+
+  if ([context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics
+                           error:&la_error]) {
+    resolve(@(3)); // BIOMETRIC_STRONG
+    return;
+  }
+
+  la_error = nil;
+  if ([context canEvaluatePolicy:LAPolicyDeviceOwnerAuthentication
+                           error:&la_error]) {
+    resolve(@(1)); // SECRET (passcode)
+    return;
+  }
+
+  resolve(@(0)); // NONE
+}
+
+// ─── getBiometricStateHash ────────────────────────────────────
+
+RCT_REMAP_METHOD(getBiometricStateHash,
+                 getBiometricStateHashWithResolver : (RCTPromiseResolveBlock)
+                     resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  LAContext *context = [[LAContext alloc] init];
+  NSError *la_error = nil;
+
+  if ([context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics
+                           error:&la_error]) {
+    NSData *domainState = context.evaluatedPolicyDomainState;
+    if (domainState) {
+      // Convert to hex string for cross-platform compatibility
+      NSMutableString *hexString =
+          [NSMutableString stringWithCapacity:domainState.length * 2];
+      const unsigned char *bytes = (const unsigned char *)domainState.bytes;
+      for (NSUInteger i = 0; i < domainState.length; i++) {
+        [hexString appendFormat:@"%02x", bytes[i]];
+      }
+      resolve(hexString);
+    } else {
+      resolve([NSNull null]);
+    }
+  } else {
+    resolve([NSNull null]);
+  }
+}
+
+// ─── authenticate ─────────────────────────────────────────────
+
+RCT_REMAP_METHOD(
+    authenticate,
+    authenticateTitle : (NSString *)title message : (NSString *)
+        message promptSubtitle : (NSString *)subtitle cancelButtonText : (
+            NSString *)cancelButtonText fallbackLabel : (NSString *)
+            fallbackLabel disableDeviceFallback : (BOOL)disableDeviceFallback
+                authenticateWithResolver : (RCTPromiseResolveBlock)
+                    resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         LAContext *context = [[LAContext alloc] init];
-        context.localizedFallbackTitle = nil;
+        _context = context;
 
-        LAPolicy localAuthPolicy = LAPolicyDeviceOwnerAuthenticationWithBiometrics;
-        if (![[UIDevice currentDevice].systemVersion hasPrefix:@"8."]) {
-            localAuthPolicy = LAPolicyDeviceOwnerAuthentication;
+        if (fallbackLabel != nil) {
+          if ([fallbackLabel length] == 0) {
+            context.localizedFallbackTitle = @"";
+          } else {
+            context.localizedFallbackTitle = fallbackLabel;
+          }
         }
 
-        [context evaluatePolicy:localAuthPolicy localizedReason:promptMessage reply:^(BOOL success, NSError *biometricError) {
-            if (success) {
-                resolve( @(YES));
+        if (cancelButtonText != nil && [cancelButtonText length] > 0) {
+          if (@available(iOS 10.0, *)) {
+            context.localizedCancelTitle = cancelButtonText;
+          }
+        }
 
-            } else {
-                NSString *message = [NSString stringWithFormat:@"%@", biometricError.localizedDescription];
-                reject(@"biometric_error", message, nil);
-            }
-        }];
-    });
+        // iOS ignores subtitle — it's Android-only. No action needed.
 
+        LAPolicy localAuthPolicy;
+        if (disableDeviceFallback) {
+          localAuthPolicy = LAPolicyDeviceOwnerAuthenticationWithBiometrics;
+        } else {
+          localAuthPolicy = LAPolicyDeviceOwnerAuthentication;
+        }
+
+        [context
+             evaluatePolicy:localAuthPolicy
+            localizedReason:message
+                      reply:^(BOOL success, NSError *biometricError) {
+                        _context = nil;
+
+                        if (success) {
+                          resolve(@(YES));
+                        } else {
+                          NSString *errorCode =
+                              [self errorCodeFromLAError:biometricError];
+                          reject(errorCode, biometricError.localizedDescription,
+                                 biometricError);
+                        }
+                      }];
+      });
 }
 
-// Don't compile this code when we build for the old architecture.
+// ─── cancelBioAuthRequest ──────────────────────────────────────
+
+RCT_REMAP_METHOD(cancelBioAuthRequest, cancelIndex : (NSNumber *)index) {
+  if (!_context)
+    return;
+  [_context invalidate];
+  _context = nil;
+}
+
+// ─── Crypto Key Management ─────────────────────────────────────
+
+RCT_REMAP_METHOD(createKeys,
+                 createKeysWithAlias : (NSString *)
+                     alias createKeysWithResolver : (RCTPromiseResolveBlock)
+                         resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSData *tag = [self keychainTagForAlias:alias];
+
+        // Delete existing keys for this alias first
+        [self deleteKeysWithTag:tag];
+
+        CFErrorRef error = NULL;
+        SecAccessControlRef accessControl = SecAccessControlCreateWithFlags(
+            kCFAllocatorDefault,
+            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+            kSecAccessControlBiometryAny, &error);
+
+        if (error != NULL || accessControl == NULL) {
+          reject(@"key_error", @"Failed to create access control",
+                 (__bridge NSError *)error);
+          return;
+        }
+
+        NSDictionary *attributes = @{
+          (__bridge NSString *)
+          kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeRSA,
+          (__bridge NSString *)kSecAttrKeySizeInBits : @2048,
+          (__bridge NSString *)kSecPrivateKeyAttrs : @{
+            (__bridge NSString *)kSecAttrIsPermanent : @YES,
+            (__bridge NSString *)kSecAttrApplicationTag : tag,
+            (__bridge NSString *)
+            kSecAttrAccessControl : (__bridge id)accessControl,
+          },
+        };
+
+        SecKeyRef privateKey =
+            SecKeyCreateRandomKey((__bridge CFDictionaryRef)attributes, &error);
+
+        CFRelease(accessControl);
+
+        if (privateKey == NULL) {
+          NSString *errorMsg = @"Failed to generate key pair";
+          if (error != NULL) {
+            NSError *nsError = (__bridge NSError *)error;
+            errorMsg = [NSString stringWithFormat:@"Key generation failed: %@",
+                                                  nsError.localizedDescription];
+          }
+          reject(@"key_error", errorMsg, (__bridge NSError *)error);
+          return;
+        }
+
+        SecKeyRef publicKey = SecKeyCopyPublicKey(privateKey);
+        CFRelease(privateKey);
+
+        if (publicKey == NULL) {
+          reject(@"key_error", @"Failed to extract public key", nil);
+          return;
+        }
+
+        CFErrorRef exportError = NULL;
+        NSData *publicKeyData =
+            (__bridge_transfer NSData *)SecKeyCopyExternalRepresentation(
+                publicKey, &exportError);
+        CFRelease(publicKey);
+
+        if (publicKeyData == nil) {
+          reject(@"key_error", @"Failed to export public key",
+                 (__bridge NSError *)exportError);
+          return;
+        }
+
+        NSString *base64PublicKey =
+            [publicKeyData base64EncodedStringWithOptions:0];
+        resolve(base64PublicKey);
+      });
+}
+
+RCT_REMAP_METHOD(createSignature,
+                 signPayload : (NSString *)payload signPromptMessage : (
+                     NSString *)promptMessage signKeyAlias : (NSString *)alias
+                     createSignatureWithResolver : (RCTPromiseResolveBlock)
+                         resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSData *tag = [self keychainTagForAlias:alias];
+
+        NSDictionary *query = @{
+          (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
+          (__bridge NSString *)kSecAttrApplicationTag : tag,
+          (__bridge NSString *)
+          kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeRSA,
+          (__bridge NSString *)kSecReturnRef : @YES,
+          (__bridge NSString *)kSecUseOperationPrompt : promptMessage,
+        };
+
+        SecKeyRef privateKey = NULL;
+        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query,
+                                              (CFTypeRef *)&privateKey);
+
+        if (status != errSecSuccess || privateKey == NULL) {
+          reject(@"signature_error",
+                 @"Private key not found. Call createKeys() first.", nil);
+          return;
+        }
+
+        NSData *payloadData = [payload dataUsingEncoding:NSUTF8StringEncoding];
+        CFErrorRef error = NULL;
+        NSData *signature = (__bridge_transfer NSData *)SecKeyCreateSignature(
+            privateKey, kSecKeyAlgorithmRSASignatureMessagePKCS1v15SHA256,
+            (__bridge CFDataRef)payloadData, &error);
+
+        CFRelease(privateKey);
+
+        if (signature == nil) {
+          reject(@"signature_error", @"Failed to create signature",
+                 (__bridge NSError *)error);
+          return;
+        }
+
+        NSString *base64Signature =
+            [signature base64EncodedStringWithOptions:0];
+        resolve(base64Signature);
+      });
+}
+
+RCT_REMAP_METHOD(biometricKeysExist,
+                 keysExistForAlias : (NSString *)alias
+                     biometricKeysExistWithResolver : (RCTPromiseResolveBlock)
+                         resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  NSData *tag = [self keychainTagForAlias:alias];
+
+  NSDictionary *query = @{
+    (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
+    (__bridge NSString *)kSecAttrApplicationTag : tag,
+    (__bridge NSString *)
+    kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeRSA,
+    (__bridge NSString *)kSecReturnRef : @YES,
+  };
+
+  SecKeyRef privateKey = NULL;
+  OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query,
+                                        (CFTypeRef *)&privateKey);
+
+  if (privateKey != NULL) {
+    CFRelease(privateKey);
+  }
+
+  resolve(@(status == errSecSuccess));
+}
+
+RCT_REMAP_METHOD(deleteKeys,
+                 deleteKeysForAlias : (NSString *)
+                     alias deleteKeysWithResolver : (RCTPromiseResolveBlock)
+                         resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  NSData *tag = [self keychainTagForAlias:alias];
+  BOOL deleted = [self deleteKeysWithTag:tag];
+  resolve(@(deleted));
+}
+
+// ─── Private Helpers ───────────────────────────────────────────
+
+- (BOOL)deleteKeysWithTag:(NSData *)tag {
+  NSDictionary *query = @{
+    (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
+    (__bridge NSString *)kSecAttrApplicationTag : tag,
+    (__bridge NSString *)
+    kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeRSA,
+  };
+
+  OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+  return status == errSecSuccess;
+}
+
+- (NSString *)errorCodeFromLAError:(NSError *)error {
+  if (!error)
+    return @"unknown";
+
+  switch (error.code) {
+  case LAErrorUserCancel:
+    return @"user_cancel";
+  case LAErrorAuthenticationFailed:
+    return @"authentication_failed";
+  case LAErrorSystemCancel:
+    return @"system_cancel";
+  case LAErrorPasscodeNotSet:
+    return @"passcode_not_set";
+  case LAErrorBiometryNotAvailable:
+    return @"not_available";
+  case LAErrorBiometryNotEnrolled:
+    return @"not_enrolled";
+  case LAErrorBiometryLockout:
+    return @"lockout";
+  case LAErrorUserFallback:
+    return @"user_cancel";
+  case LAErrorAppCancel:
+    return @"app_cancel";
+  case LAErrorInvalidContext:
+    return @"app_cancel";
+  default:
+    return @"unknown";
+  }
+}
+
+// ─── TurboModule ───────────────────────────────────────────────
+
 #ifdef RCT_NEW_ARCH_ENABLED
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
-    (const facebook::react::ObjCTurboModule::InitParams &)params
-{
-    return std::make_shared<facebook::react::NativeEasyBiometricsSpecJSI>(params);
+    (const facebook::react::ObjCTurboModule::InitParams &)params {
+  return std::make_shared<facebook::react::NativeEasyBiometricsSpecJSI>(params);
 }
 #endif
 
