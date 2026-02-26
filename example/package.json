@@ -14,7 +14,7 @@
     "expo-dev-client": "*",
     "expo-status-bar": "~55.0.4",
     "react": "19.2.0",
-    "react-native": "0.83.2",
+    "react-native": "0.84.0",
     "react-native-easy-biometrics": "file:.."
   },
   "devDependencies": {
