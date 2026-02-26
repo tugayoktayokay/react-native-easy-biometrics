@@ -87,9 +87,15 @@ RCT_REMAP_METHOD(getBiometryType,
     }
   }
 
+  NSMutableArray *biometryTypesArray = [NSMutableArray array];
+  if (![biometryType isEqualToString:@"None"]) {
+    [biometryTypesArray addObject:biometryType];
+  }
+
   NSDictionary *result = @{
     @"available" : @(available),
     @"biometryType" : biometryType,
+    @"biometryTypes" : biometryTypesArray,
   };
 
   if (errorMsg) {

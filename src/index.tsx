@@ -90,8 +90,10 @@ export interface AuthOptions {
 export interface SensorResult {
   /** Whether biometric authentication is available */
   available: boolean;
-  /** The type of biometric sensor on the device */
+  /** The primary biometric sensor type (strongest available) */
   biometryType: BiometryType;
+  /** All supported biometric types on the device (e.g. ['Fingerprint', 'FaceID'] on Samsung) */
+  biometryTypes: BiometryType[];
   /** Error message if biometrics are not available */
   error?: string;
 }
@@ -135,12 +137,14 @@ const getBiometryType = async (): Promise<SensorResult> => {
     return {
       available: result.available,
       biometryType: result.biometryType as BiometryType,
+      biometryTypes: (result.biometryTypes || []) as BiometryType[],
       error: result.error,
     };
   } catch (e: any) {
     return {
       available: false,
       biometryType: BiometryType.NONE,
+      biometryTypes: [],
       error: e.message,
     };
   }

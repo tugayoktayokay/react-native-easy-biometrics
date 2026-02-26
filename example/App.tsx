@@ -97,7 +97,8 @@ export default function App() {
 
   const handleGetSensorInfo = async () => {
     const sensor = await RNBiometrics.getBiometryType();
-    addLog(`Sensor: ${JSON.stringify(sensor)}`);
+    addLog(`Primary: ${sensor.biometryType}`);
+    addLog(`All types: ${sensor.biometryTypes.join(', ') || 'None'}`);
   };
 
   const handleCheckEnrolled = async () => {

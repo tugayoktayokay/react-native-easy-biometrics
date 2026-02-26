@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Face ID · Touch ID · Fingerprint · Iris · Crypto Keys · Change Detection · React Hook · Expo Plugin
+  Face ID · Touch ID · Fingerprint · Iris · Crypto Keys · Multi-Alias · Change Detection · React Hook · Expo Plugin
 </p>
 
 <p align="center">
@@ -130,6 +130,7 @@ import RNBiometrics, {
 // 1. Check what's available
 const sensor = await RNBiometrics.getBiometryType();
 console.log(sensor.biometryType); // 'FaceID' | 'TouchID' | 'Fingerprint' | 'Iris' | 'None'
+console.log(sensor.biometryTypes); // e.g. ['Fingerprint', 'FaceID'] on Samsung
 
 // 2. Check if enrolled
 const enrolled = await RNBiometrics.isEnrolled();
@@ -291,7 +292,7 @@ switch (level) {
 | Method                          | Returns                          | Description                                  |
 | ------------------------------- | -------------------------------- | -------------------------------------------- |
 | `canAuthenticate()`             | `Promise<boolean>`               | Check if biometric auth is available         |
-| `getBiometryType()`             | `Promise<SensorResult>`          | Detect biometric sensor type                 |
+| `getBiometryType()`             | `Promise<SensorResult>`          | Detect biometric sensor type(s)              |
 | `isEnrolled()`                  | `Promise<boolean>`               | Check if biometrics are enrolled             |
 | `getSecurityLevel()`            | `Promise<SecurityLevel>`         | Get device security level                    |
 | `authenticate(options)`         | `Promise<AuthResult>`            | Authenticate with typed results              |

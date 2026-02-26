@@ -25,6 +25,7 @@ import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.module.annotations.ReactModule;
 
@@ -94,18 +95,29 @@ public class EasyBiometricsModule extends ReactContextBaseJavaModule {
             boolean available = (canAuth == BiometricManager.BIOMETRIC_SUCCESS);
             result.putBoolean("available", available);
 
+            // Detect all available biometric types
+            WritableArray biometryTypes = Arguments.createArray();
             String biometryType = "None";
+
+            if (pm.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT)) {
+                biometryTypes.pushString("Fingerprint");
+                if (biometryType.equals("None")) biometryType = "Fingerprint";
+            }
             if (pm.hasSystemFeature(PackageManager.FEATURE_FACE)) {
-                biometryType = "FaceID";
-            } else if (pm.hasSystemFeature(PackageManager.FEATURE_IRIS)) {
-                biometryType = "Iris";
-            } else if (pm.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT)) {
+                biometryTypes.pushString("FaceID");
+                if (biometryType.equals("None")) biometryType = "FaceID";
+            }
+            if (pm.hasSystemFeature(PackageManager.FEATURE_IRIS)) {
+                biometryTypes.pushString("Iris");
+                if (biometryType.equals("None")) biometryType = "Iris";
+            }
+            if (biometryTypes.size() == 0 && available) {
                 biometryType = "Fingerprint";
-            } else if (available) {
-                biometryType = "Fingerprint";
+                biometryTypes.pushString("Fingerprint");
             }
 
             result.putString("biometryType", biometryType);
+            result.putArray("biometryTypes", biometryTypes);
 
             if (!available) {
                 switch (canAuth) {
