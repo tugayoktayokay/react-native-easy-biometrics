@@ -182,6 +182,26 @@ RNBiometrics.authenticate({
 setTimeout(() => controller.abort(), 5000);
 ```
 
+## ⚡ Quick Status Check
+
+Get everything you need in a single call:
+
+```typescript
+const status = await RNBiometrics.getStatus();
+// {
+//   available: true,
+//   biometryType: 'Fingerprint',
+//   biometryTypes: ['Fingerprint', 'FaceID'],
+//   enrolled: true,
+//   securityLevel: 3, // BIOMETRIC_STRONG
+//   error?: string
+// }
+
+if (status.available && status.enrolled) {
+  console.log(`Ready: ${status.biometryType}`);
+}
+```
+
 ## 🔐 Crypto Key Management
 
 Generate RSA 2048 key pairs protected by biometric authentication. Perfect for banking apps, secure login, and payload signing.
@@ -295,6 +315,7 @@ switch (level) {
 | `getBiometryType()`             | `Promise<SensorResult>`          | Detect biometric sensor type(s)              |
 | `isEnrolled()`                  | `Promise<boolean>`               | Check if biometrics are enrolled             |
 | `getSecurityLevel()`            | `Promise<SecurityLevel>`         | Get device security level                    |
+| `getStatus()`                   | `Promise<BiometricStatus>`       | **Everything in one call** ⭐                |
 | `authenticate(options)`         | `Promise<AuthResult>`            | Authenticate with typed results              |
 | `createKeys(keyAlias?)`         | `Promise<CreateKeysResult>`      | Generate RSA 2048 key pair                   |
 | `createSignature(options)`      | `Promise<CreateSignatureResult>` | Sign payload with biometric key              |
@@ -317,15 +338,17 @@ switch (level) {
 
 ### Hook
 
-| Property           | Type                               | Description                  |
-| ------------------ | ---------------------------------- | ---------------------------- |
-| `available`        | `boolean`                          | Biometric hardware available |
-| `biometryType`     | `BiometryType`                     | Type of biometric sensor     |
-| `isEnrolled`       | `boolean`                          | Biometric data enrolled      |
-| `isAuthenticating` | `boolean`                          | Auth in progress             |
-| `loading`          | `boolean`                          | Initial state loading        |
-| `authenticate`     | `(options) => Promise<AuthResult>` | Authenticate function        |
-| `cancel`           | `() => void`                       | Cancel authentication        |
+| Property           | Type                               | Description                   |
+| ------------------ | ---------------------------------- | ----------------------------- |
+| `available`        | `boolean`                          | Biometric hardware available  |
+| `biometryType`     | `BiometryType`                     | Primary biometric sensor type |
+| `biometryTypes`    | `BiometryType[]`                   | All supported biometric types |
+| `isEnrolled`       | `boolean`                          | Biometric data enrolled       |
+| `securityLevel`    | `SecurityLevel`                    | Device security level         |
+| `isAuthenticating` | `boolean`                          | Auth in progress              |
+| `loading`          | `boolean`                          | Initial state loading         |
+| `authenticate`     | `(options) => Promise<AuthResult>` | Authenticate function         |
+| `cancel`           | `() => void`                       | Cancel authentication         |
 
 ### Enums
 
@@ -334,6 +357,10 @@ switch (level) {
 **`BiometricError`**: `user_cancel` | `lockout` | `not_enrolled` | `not_available` | `system_cancel` | `passcode_not_set` | `authentication_failed` | `app_cancel` | `lockout_permanent` | `unknown`
 
 **`SecurityLevel`**: `NONE (0)` | `SECRET (1)` | `BIOMETRIC_WEAK (2)` | `BIOMETRIC_STRONG (3)`
+
+## 🔄 Migrating from react-native-biometrics
+
+Coming from `react-native-biometrics` (SelfLender) or `@sbaiahmed1/react-native-biometrics`? See the full **[Migration Guide](./MIGRATION.md)** with API mapping and code examples.
 
 ## License
 

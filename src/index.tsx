@@ -99,6 +99,25 @@ export interface SensorResult {
 }
 
 /**
+ * Complete biometric status — everything in one call.
+ * Combines getBiometryType(), isEnrolled(), and getSecurityLevel().
+ */
+export interface BiometricStatus {
+  /** Whether biometric authentication is available */
+  available: boolean;
+  /** The primary biometric sensor type (strongest available) */
+  biometryType: BiometryType;
+  /** All supported biometric types on the device */
+  biometryTypes: BiometryType[];
+  /** Whether biometric data is enrolled */
+  enrolled: boolean;
+  /** Device security level */
+  securityLevel: SecurityLevel;
+  /** Error message if biometrics are not available */
+  error?: string;
+}
+
+/**
  * Result of key creation.
  */
 export interface CreateKeysResult {
@@ -164,6 +183,45 @@ const isEnrolled = (): Promise<boolean> => {
 const getSecurityLevel = async (): Promise<SecurityLevel> => {
   const level = await RNBiometricsNative.getSecurityLevel();
   return level as SecurityLevel;
+};
+
+/**
+ * Get the complete biometric status in a single call.
+ * Combines getBiometryType(), isEnrolled(), and getSecurityLevel().
+ *
+ * @example
+ * ```ts
+ * const status = await getStatus();
+ * if (status.available && status.enrolled) {
+ *   console.log(`Ready: ${status.biometryType} (${status.securityLevel})`);
+ * }
+ * ```
+ */
+const getStatus = async (): Promise<BiometricStatus> => {
+  try {
+    const [sensor, enrolled, securityLevel] = await Promise.all([
+      getBiometryType(),
+      isEnrolled(),
+      getSecurityLevel(),
+    ]);
+    return {
+      available: sensor.available,
+      biometryType: sensor.biometryType,
+      biometryTypes: sensor.biometryTypes,
+      enrolled,
+      securityLevel,
+      error: sensor.error,
+    };
+  } catch (e: any) {
+    return {
+      available: false,
+      biometryType: BiometryType.NONE,
+      biometryTypes: [],
+      enrolled: false,
+      securityLevel: SecurityLevel.NONE,
+      error: e.message,
+    };
+  }
 };
 
 /**
@@ -335,7 +393,11 @@ export const useBiometrics = () => {
   const [biometryType, setBiometryType] = useState<BiometryType>(
     BiometryType.NONE
   );
+  const [biometryTypes, setBiometryTypes] = useState<BiometryType[]>([]);
   const [enrolled, setEnrolled] = useState(false);
+  const [securityLevel, setSecurityLevel] = useState<SecurityLevel>(
+    SecurityLevel.NONE
+  );
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -343,12 +405,13 @@ export const useBiometrics = () => {
     let mounted = true;
     const init = async () => {
       try {
-        const sensor = await getBiometryType();
-        const enrolledResult = await isEnrolled();
+        const status = await getStatus();
         if (mounted) {
-          setAvailable(sensor.available);
-          setBiometryType(sensor.biometryType);
-          setEnrolled(enrolledResult);
+          setAvailable(status.available);
+          setBiometryType(status.biometryType);
+          setBiometryTypes(status.biometryTypes);
+          setEnrolled(status.enrolled);
+          setSecurityLevel(status.securityLevel);
         }
       } catch {
         // Silently handle — available stays false
@@ -381,10 +444,14 @@ export const useBiometrics = () => {
   return {
     /** Whether biometric hardware is available */
     available,
-    /** Type of biometric sensor (FaceID, TouchID, Fingerprint, etc.) */
+    /** Primary biometric sensor type (FaceID, TouchID, Fingerprint, etc.) */
     biometryType,
+    /** All supported biometric types on the device */
+    biometryTypes,
     /** Whether biometric data is enrolled */
     isEnrolled: enrolled,
+    /** Device security level */
+    securityLevel,
     /** Whether authentication is currently in progress */
     isAuthenticating,
     /** Whether the hook is still loading initial state */
@@ -403,6 +470,7 @@ const RNBiometrics = {
   getBiometryType,
   isEnrolled,
   getSecurityLevel,
+  getStatus,
   authenticate,
   // Crypto
   createKeys,
