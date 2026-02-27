@@ -1,4 +1,4 @@
-import { NativeModules } from 'react-native';
+import { NativeModules, AppState, AppStateStatus } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
 
 const { EasyBiometrics: RNBiometricsNative } = NativeModules;
@@ -54,6 +54,16 @@ export enum SecurityLevel {
   BIOMETRIC_WEAK = 2,
   /** Strong biometric (e.g. fingerprint, 3D face scan) */
   BIOMETRIC_STRONG = 3,
+}
+
+/**
+ * Cryptographic key type for key pair generation.
+ */
+export enum KeyType {
+  /** EC P-256 (secp256r1) — uses Secure Enclave (iOS) or StrongBox (Android) */
+  EC256 = 'ec256',
+  /** RSA 2048 — widely compatible, stored in Keychain/Keystore */
+  RSA2048 = 'rsa2048',
 }
 
 /**
@@ -123,6 +133,8 @@ export interface BiometricStatus {
 export interface CreateKeysResult {
   /** Base64-encoded public key */
   publicKey: string;
+  /** Type of key that was generated */
+  keyType: KeyType;
 }
 
 /**
@@ -134,6 +146,33 @@ export interface CreateSignatureResult {
   /** Base64-encoded signature (undefined if not successful) */
   signature?: string;
   /** Error message if signature creation failed */
+  error?: string;
+}
+
+/**
+ * Risk level for device integrity.
+ */
+export type RiskLevel = 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH';
+
+/**
+ * Result of device integrity check.
+ */
+export interface DeviceIntegrityResult {
+  /** Whether the device is compromised (rooted/jailbroken) */
+  isCompromised: boolean;
+  /** Risk assessment level */
+  riskLevel: RiskLevel;
+  /** Android only: Whether device is rooted */
+  isRooted?: boolean;
+  /** iOS only: Whether device is jailbroken */
+  isJailbroken?: boolean;
+  /** Android only: Whether secure hardware (TEE/StrongBox) is available */
+  hasSecureHardware?: boolean;
+  /** iOS only: Whether Secure Enclave is available */
+  hasSecureEnclave?: boolean;
+  /** Android only: Whether device has a secure lock screen */
+  isKeyguardSecure?: boolean;
+  /** Error message if check failed */
   error?: string;
 }
 
@@ -284,21 +323,23 @@ const authenticate = async (options: AuthOptions): Promise<AuthResult> => {
 // ─── Crypto Key Management ──────────────────────────────────────
 
 /**
- * Generate a new RSA 2048 key pair protected by biometric authentication.
- * The private key is stored securely in the device's Keychain (iOS) or Keystore (Android).
- * Returns the public key as a base64-encoded string.
+ * Generate a new cryptographic key pair protected by biometric authentication.
+ * The private key is stored securely in the Secure Enclave (iOS) or StrongBox/Keystore (Android).
  *
- * @param keyAlias - Optional alias for the key pair. Defaults to 'default'. Use different aliases to manage multiple key pairs.
+ * @param keyAlias - Optional alias for the key pair. Defaults to 'default'.
+ * @param keyType - Optional key type. 'ec256' for Secure Enclave (recommended) or 'rsa2048' (default).
  */
 const createKeys = async (
-  keyAlias: string = 'default'
+  keyAlias: string = 'default',
+  keyType: KeyType = KeyType.RSA2048
 ): Promise<CreateKeysResult> => {
-  const publicKey = await RNBiometricsNative.createKeys(keyAlias);
-  return { publicKey };
+  const result = await RNBiometricsNative.createKeys(keyAlias, keyType);
+  return { publicKey: result.publicKey, keyType: result.keyType as KeyType };
 };
 
 /**
- * Create a RSA PKCS#1v1.5 SHA-256 signature using the biometric-protected private key.
+ * Create a cryptographic signature using the biometric-protected private key.
+ * Automatically uses the correct algorithm based on key type (ECDSA for EC256, RSA PKCS#1v1.5 for RSA2048).
  * The user will be prompted for biometric authentication before signing.
  */
 const createSignature = async (options: {
@@ -372,6 +413,108 @@ const isBiometricChanged = async (savedHash: string): Promise<boolean> => {
   } catch {
     return true;
   }
+};
+
+// ─── Device Integrity ───────────────────────────────────────────
+
+/**
+ * Check the device's integrity status (rooted/jailbroken detection).
+ *
+ * @example
+ * ```ts
+ * const integrity = await RNBiometrics.getDeviceIntegrity();
+ * if (integrity.isCompromised) {
+ *   console.warn(`Device compromised! Risk level: ${integrity.riskLevel}`);
+ * }
+ * ```
+ */
+const getDeviceIntegrity = async (): Promise<DeviceIntegrityResult> => {
+  try {
+    const result = await RNBiometricsNative.getDeviceIntegrity();
+    return result as DeviceIntegrityResult;
+  } catch (e: any) {
+    return {
+      isCompromised: false,
+      riskLevel: 'NONE',
+      error: e.message,
+    };
+  }
+};
+
+// ─── Biometric Event Listener ───────────────────────────────────
+
+/**
+ * Event emitted when biometric enrollment changes.
+ */
+export interface BiometricChangeEvent {
+  /** Timestamp of the detected change */
+  timestamp: number;
+  /** Whether biometrics are currently available */
+  available: boolean;
+  /** Current biometry type */
+  biometryType: BiometryType;
+  /** Whether biometrics are enrolled */
+  enrolled: boolean;
+}
+
+/**
+ * Subscribe to biometric enrollment changes.
+ * Monitors changes when the app returns from background.
+ * Returns an unsubscribe function.
+ *
+ * @example
+ * ```ts
+ * const unsubscribe = RNBiometrics.onBiometricChange((event) => {
+ *   if (!event.enrolled) {
+ *     console.warn('Biometrics were removed!');
+ *   }
+ * });
+ *
+ * // Cleanup
+ * unsubscribe();
+ * ```
+ */
+const onBiometricChange = (
+  callback: (event: BiometricChangeEvent) => void
+): (() => void) => {
+  let lastHash: string | null = null;
+  let isInitialized = false;
+
+  // Get initial hash
+  getBiometricStateHash().then((hash) => {
+    lastHash = hash;
+    isInitialized = true;
+  });
+
+  const handleAppStateChange = async (nextState: AppStateStatus) => {
+    if (nextState === 'active' && isInitialized) {
+      try {
+        const currentHash = await getBiometricStateHash();
+        if (lastHash !== null && currentHash !== lastHash) {
+          const status = await getStatus();
+          callback({
+            timestamp: Date.now(),
+            available: status.available,
+            biometryType: status.biometryType,
+            enrolled: status.enrolled,
+          });
+        }
+        lastHash = currentHash;
+      } catch {
+        // Silently handle
+      }
+    }
+  };
+
+  const subscription = AppState.addEventListener(
+    'change',
+    handleAppStateChange
+  );
+
+  // Return unsubscribe function
+  return () => {
+    subscription.remove();
+  };
 };
 
 // ─── React Hook ─────────────────────────────────────────────────
@@ -480,6 +623,10 @@ const RNBiometrics = {
   // Biometric change detection
   getBiometricStateHash,
   isBiometricChanged,
+  // Device integrity
+  getDeviceIntegrity,
+  // Biometric event listener
+  onBiometricChange,
 };
 
 export default RNBiometrics;

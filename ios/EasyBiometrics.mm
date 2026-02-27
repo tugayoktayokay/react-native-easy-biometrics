@@ -244,10 +244,11 @@ RCT_REMAP_METHOD(cancelBioAuthRequest, cancelIndex : (NSNumber *)index) {
 
 // ─── Crypto Key Management ─────────────────────────────────────
 
-RCT_REMAP_METHOD(createKeys,
-                 createKeysWithAlias : (NSString *)
-                     alias createKeysWithResolver : (RCTPromiseResolveBlock)
-                         resolve rejecter : (RCTPromiseRejectBlock)reject) {
+RCT_REMAP_METHOD(
+    createKeys,
+    createKeysWithAlias : (NSString *)alias createKeysWithKeyType : (NSString *)
+        keyType createKeysWithResolver : (RCTPromiseResolveBlock)
+            resolve rejecter : (RCTPromiseRejectBlock)reject) {
   dispatch_async(
       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSData *tag = [self keychainTagForAlias:alias];
@@ -255,11 +256,16 @@ RCT_REMAP_METHOD(createKeys,
         // Delete existing keys for this alias first
         [self deleteKeysWithTag:tag];
 
+        BOOL isEC = [keyType isEqualToString:@"ec256"];
+
         CFErrorRef error = NULL;
+        SecAccessControlCreateFlags flags = kSecAccessControlBiometryAny;
+        if (isEC) {
+          flags |= kSecAccessControlPrivateKeyUsage;
+        }
         SecAccessControlRef accessControl = SecAccessControlCreateWithFlags(
             kCFAllocatorDefault,
-            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
-            kSecAccessControlBiometryAny, &error);
+            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, flags, &error);
 
         if (error != NULL || accessControl == NULL) {
           reject(@"key_error", @"Failed to create access control",
@@ -267,16 +273,25 @@ RCT_REMAP_METHOD(createKeys,
           return;
         }
 
-        NSDictionary *attributes = @{
+        NSMutableDictionary *privateKeyAttrs = [@{
+          (__bridge NSString *)kSecAttrIsPermanent : @YES,
+          (__bridge NSString *)kSecAttrApplicationTag : tag,
           (__bridge NSString *)
-          kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeRSA,
-          (__bridge NSString *)kSecAttrKeySizeInBits : @2048,
-          (__bridge NSString *)kSecPrivateKeyAttrs : @{
-            (__bridge NSString *)kSecAttrIsPermanent : @YES,
-            (__bridge NSString *)kSecAttrApplicationTag : tag,
-            (__bridge NSString *)
-            kSecAttrAccessControl : (__bridge id)accessControl,
-          },
+          kSecAttrAccessControl : (__bridge id)accessControl,
+        } mutableCopy];
+
+        // EC256 can use Secure Enclave
+        if (isEC) {
+          privateKeyAttrs[(__bridge NSString *)kSecAttrTokenID] =
+              (__bridge NSString *)kSecAttrTokenIDSecureEnclave;
+        }
+
+        NSDictionary *attributes = @{
+          (__bridge NSString *)kSecAttrKeyType : isEC
+              ? (__bridge NSString *)kSecAttrKeyTypeECSECPrimeRandom
+              : (__bridge NSString *)kSecAttrKeyTypeRSA,
+          (__bridge NSString *)kSecAttrKeySizeInBits : isEC ? @256 : @2048,
+          (__bridge NSString *)kSecPrivateKeyAttrs : privateKeyAttrs,
         };
 
         SecKeyRef privateKey =
@@ -317,7 +332,11 @@ RCT_REMAP_METHOD(createKeys,
 
         NSString *base64PublicKey =
             [publicKeyData base64EncodedStringWithOptions:0];
-        resolve(base64PublicKey);
+        NSDictionary *result = @{
+          @"publicKey" : base64PublicKey,
+          @"keyType" : isEC ? @"ec256" : @"rsa2048",
+        };
+        resolve(result);
       });
 }
 
@@ -330,20 +349,33 @@ RCT_REMAP_METHOD(createSignature,
       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSData *tag = [self keychainTagForAlias:alias];
 
-        NSDictionary *query = @{
-          (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
-          (__bridge NSString *)kSecAttrApplicationTag : tag,
-          (__bridge NSString *)
-          kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeRSA,
-          (__bridge NSString *)kSecReturnRef : @YES,
-          (__bridge NSString *)kSecUseOperationPrompt : promptMessage,
-        };
-
+        // Try EC first, then RSA
         SecKeyRef privateKey = NULL;
-        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query,
-                                              (CFTypeRef *)&privateKey);
+        BOOL isEC = NO;
+        NSArray *keyTypes = @[
+          (__bridge NSString *)kSecAttrKeyTypeECSECPrimeRandom,
+          (__bridge NSString *)kSecAttrKeyTypeRSA
+        ];
 
-        if (status != errSecSuccess || privateKey == NULL) {
+        for (NSString *keyType in keyTypes) {
+          NSDictionary *query = @{
+            (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
+            (__bridge NSString *)kSecAttrApplicationTag : tag,
+            (__bridge NSString *)kSecAttrKeyType : keyType,
+            (__bridge NSString *)kSecReturnRef : @YES,
+            (__bridge NSString *)kSecUseOperationPrompt : promptMessage,
+          };
+          OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query,
+                                                (CFTypeRef *)&privateKey);
+          if (status == errSecSuccess && privateKey != NULL) {
+            isEC =
+                [keyType isEqualToString:(__bridge NSString *)
+                                             kSecAttrKeyTypeECSECPrimeRandom];
+            break;
+          }
+        }
+
+        if (privateKey == NULL) {
           reject(@"signature_error",
                  @"Private key not found. Call createKeys() first.", nil);
           return;
@@ -351,9 +383,11 @@ RCT_REMAP_METHOD(createSignature,
 
         NSData *payloadData = [payload dataUsingEncoding:NSUTF8StringEncoding];
         CFErrorRef error = NULL;
+        SecKeyAlgorithm algorithm =
+            isEC ? kSecKeyAlgorithmECDSASignatureMessageX962SHA256
+                 : kSecKeyAlgorithmRSASignatureMessagePKCS1v15SHA256;
         NSData *signature = (__bridge_transfer NSData *)SecKeyCreateSignature(
-            privateKey, kSecKeyAlgorithmRSASignatureMessagePKCS1v15SHA256,
-            (__bridge CFDataRef)payloadData, &error);
+            privateKey, algorithm, (__bridge CFDataRef)payloadData, &error);
 
         CFRelease(privateKey);
 
@@ -375,23 +409,33 @@ RCT_REMAP_METHOD(biometricKeysExist,
                          resolve rejecter : (RCTPromiseRejectBlock)reject) {
   NSData *tag = [self keychainTagForAlias:alias];
 
-  NSDictionary *query = @{
-    (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
-    (__bridge NSString *)kSecAttrApplicationTag : tag,
-    (__bridge NSString *)
-    kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeRSA,
-    (__bridge NSString *)kSecReturnRef : @YES,
-  };
+  // Check both EC and RSA key types
+  NSArray *keyTypes = @[
+    (__bridge NSString *)kSecAttrKeyTypeECSECPrimeRandom,
+    (__bridge NSString *)kSecAttrKeyTypeRSA
+  ];
 
-  SecKeyRef privateKey = NULL;
-  OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query,
-                                        (CFTypeRef *)&privateKey);
+  for (NSString *keyType in keyTypes) {
+    NSDictionary *query = @{
+      (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
+      (__bridge NSString *)kSecAttrApplicationTag : tag,
+      (__bridge NSString *)kSecAttrKeyType : keyType,
+      (__bridge NSString *)kSecReturnRef : @YES,
+    };
 
-  if (privateKey != NULL) {
-    CFRelease(privateKey);
+    SecKeyRef privateKey = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query,
+                                          (CFTypeRef *)&privateKey);
+    if (privateKey != NULL) {
+      CFRelease(privateKey);
+    }
+    if (status == errSecSuccess) {
+      resolve(@YES);
+      return;
+    }
   }
 
-  resolve(@(status == errSecSuccess));
+  resolve(@NO);
 }
 
 RCT_REMAP_METHOD(deleteKeys,
@@ -403,18 +447,127 @@ RCT_REMAP_METHOD(deleteKeys,
   resolve(@(deleted));
 }
 
+// ─── Device Integrity ─────────────────────────────────────────
+
+RCT_REMAP_METHOD(getDeviceIntegrity,
+                 getDeviceIntegrityWithResolver : (RCTPromiseResolveBlock)
+                     resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  BOOL isJailbroken = [self checkJailbroken];
+
+  // Check Secure Enclave availability
+  BOOL hasSecureEnclave = NO;
+  if (@available(iOS 9.0, *)) {
+    // Devices with A7+ chips have Secure Enclave
+    // We test by checking if we can create an EC key with Secure Enclave
+    CFErrorRef error = NULL;
+    SecAccessControlRef accessControl = SecAccessControlCreateWithFlags(
+        kCFAllocatorDefault, kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+        kSecAccessControlPrivateKeyUsage, &error);
+    if (accessControl != NULL) {
+      NSDictionary *attributes = @{
+        (__bridge NSString *)
+        kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge NSString *)kSecAttrKeySizeInBits : @256,
+        (__bridge NSString *)
+        kSecAttrTokenID : (__bridge NSString *)kSecAttrTokenIDSecureEnclave,
+        (__bridge NSString *)kSecPrivateKeyAttrs : @{
+          (__bridge NSString *)kSecAttrIsPermanent : @NO,
+          (__bridge NSString *)
+          kSecAttrAccessControl : (__bridge id)accessControl,
+        },
+      };
+      SecKeyRef testKey =
+          SecKeyCreateRandomKey((__bridge CFDictionaryRef)attributes, &error);
+      if (testKey != NULL) {
+        hasSecureEnclave = YES;
+        CFRelease(testKey);
+      }
+      CFRelease(accessControl);
+    }
+  }
+
+  NSString *riskLevel = @"NONE";
+  if (isJailbroken)
+    riskLevel = @"HIGH";
+  else if (!hasSecureEnclave)
+    riskLevel = @"LOW";
+
+  NSDictionary *result = @{
+    @"isJailbroken" : @(isJailbroken),
+    @"isCompromised" : @(isJailbroken),
+    @"hasSecureEnclave" : @(hasSecureEnclave),
+    @"riskLevel" : riskLevel,
+  };
+  resolve(result);
+}
+
+- (BOOL)checkJailbroken {
+#if TARGET_OS_SIMULATOR
+  return NO;
+#else
+  // Check for known jailbreak files
+  NSArray *paths = @[
+    @"/Applications/Cydia.app",
+    @"/Applications/Sileo.app",
+    @"/Library/MobileSubstrate/MobileSubstrate.dylib",
+    @"/bin/bash",
+    @"/usr/sbin/sshd",
+    @"/etc/apt",
+    @"/usr/bin/ssh",
+    @"/private/var/lib/apt/",
+    @"/private/var/lib/cydia",
+    @"/private/var/stash",
+  ];
+  for (NSString *path in paths) {
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+      return YES;
+    }
+  }
+
+  // Check if app can write to system paths
+  NSError *error = nil;
+  [@"jailbreak_test" writeToFile:@"/private/jailbreak_test.txt"
+                      atomically:YES
+                        encoding:NSUTF8StringEncoding
+                           error:&error];
+  if (error == nil) {
+    [[NSFileManager defaultManager]
+        removeItemAtPath:@"/private/jailbreak_test.txt"
+                   error:nil];
+    return YES;
+  }
+
+  // Check for Cydia URL scheme
+  if ([[UIApplication sharedApplication]
+          canOpenURL:
+              [NSURL URLWithString:@"cydia://package/com.example.package"]]) {
+    return YES;
+  }
+
+  return NO;
+#endif
+}
+
 // ─── Private Helpers ───────────────────────────────────────────
 
 - (BOOL)deleteKeysWithTag:(NSData *)tag {
-  NSDictionary *query = @{
-    (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
-    (__bridge NSString *)kSecAttrApplicationTag : tag,
-    (__bridge NSString *)
-    kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeRSA,
-  };
-
-  OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
-  return status == errSecSuccess;
+  // Delete both EC and RSA keys for this tag
+  BOOL deleted = NO;
+  NSArray *keyTypes = @[
+    (__bridge NSString *)kSecAttrKeyTypeECSECPrimeRandom,
+    (__bridge NSString *)kSecAttrKeyTypeRSA
+  ];
+  for (NSString *keyType in keyTypes) {
+    NSDictionary *query = @{
+      (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassKey,
+      (__bridge NSString *)kSecAttrApplicationTag : tag,
+      (__bridge NSString *)kSecAttrKeyType : keyType,
+    };
+    OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+    if (status == errSecSuccess)
+      deleted = YES;
+  }
+  return deleted;
 }
 
 - (NSString *)errorCodeFromLAError:(NSError *)error {

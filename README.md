@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Face ID · Touch ID · Fingerprint · Iris · Crypto Keys · Multi-Alias · Change Detection · React Hook · Expo Plugin
+  Face ID · Touch ID · Fingerprint · Iris · EC256 & RSA Crypto · Device Integrity · Change Detection · React Hook · Expo Plugin
 </p>
 
 <p align="center">
@@ -29,10 +29,13 @@
 | Typed error codes (10 error types)                        | ✅  |   ✅    |
 | Cancel via `AbortSignal`                                  | ✅  |   ✅    |
 | Security level detection (None/Secret/Weak/Strong)        | ✅  |   ✅    |
+| EC256 keys (Secure Enclave / StrongBox)                   | ✅  |   ✅    |
 | RSA 2048 key pair generation                              | ✅  |   ✅    |
 | Multiple key aliases                                      | ✅  |   ✅    |
 | Biometric-protected payload signing                       | ✅  |   ✅    |
 | Biometric change detection                                | ✅  |   ✅    |
+| Biometric change event listener                           | ✅  |   ✅    |
+| Device integrity (root/jailbreak detection)               | ✅  |   ✅    |
 | Device credential fallback control                        | ✅  |   ✅    |
 | `useBiometrics()` React Hook                              | ✅  |   ✅    |
 | Expo Config Plugin                                        | ✅  |   ✅    |
@@ -58,6 +61,18 @@ Add this to your `Info.plist` (or use the Expo plugin to do it automatically):
 <key>NSFaceIDUsageDescription</key>
 <string>Allow the app to use Face ID for authentication</string>
 ```
+
+### Android
+
+Add the biometric permission to your `AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.USE_BIOMETRIC" />
+```
+
+> **Note:** Requires `minSdkVersion 23` (Android 6.0+). The library auto-links on React Native 0.60+ — no manual linking needed.
+
+> **ProGuard/R8:** Rules are applied automatically via `consumer-rules.pro` — no manual setup needed even with `minifyEnabled true`.
 
 ### Expo
 
@@ -317,12 +332,14 @@ switch (level) {
 | `getSecurityLevel()`            | `Promise<SecurityLevel>`         | Get device security level                    |
 | `getStatus()`                   | `Promise<BiometricStatus>`       | **Everything in one call** ⭐                |
 | `authenticate(options)`         | `Promise<AuthResult>`            | Authenticate with typed results              |
-| `createKeys(keyAlias?)`         | `Promise<CreateKeysResult>`      | Generate RSA 2048 key pair                   |
-| `createSignature(options)`      | `Promise<CreateSignatureResult>` | Sign payload with biometric key              |
+| `createKeys(alias?, keyType?)`  | `Promise<CreateKeysResult>`      | Generate EC256 or RSA2048 key pair           |
+| `createSignature(options)`      | `Promise<CreateSignatureResult>` | Sign payload (auto-detects EC/RSA)           |
 | `biometricKeysExist(keyAlias?)` | `Promise<boolean>`               | Check if keys exist for alias                |
 | `deleteKeys(keyAlias?)`         | `Promise<boolean>`               | Delete stored keys for alias                 |
 | `getBiometricStateHash()`       | `Promise<string \| null>`        | Get current biometric enrollment hash        |
 | `isBiometricChanged(savedHash)` | `Promise<boolean>`               | Check if biometrics changed since saved hash |
+| `getDeviceIntegrity()`          | `Promise<DeviceIntegrityResult>` | Root/jailbreak detection + risk level        |
+| `onBiometricChange(callback)`   | `() => void`                     | Subscribe to enrollment changes              |
 
 ### AuthOptions
 
@@ -354,13 +371,21 @@ switch (level) {
 
 **`BiometryType`**: `FaceID` | `TouchID` | `Fingerprint` | `Iris` | `None`
 
+**`KeyType`**: `EC256` (Secure Enclave) | `RSA2048` (default)
+
 **`BiometricError`**: `user_cancel` | `lockout` | `not_enrolled` | `not_available` | `system_cancel` | `passcode_not_set` | `authentication_failed` | `app_cancel` | `lockout_permanent` | `unknown`
 
 **`SecurityLevel`**: `NONE (0)` | `SECRET (1)` | `BIOMETRIC_WEAK (2)` | `BIOMETRIC_STRONG (3)`
 
+**`RiskLevel`**: `NONE` | `LOW` | `MEDIUM` | `HIGH`
+
 ## 🔄 Migrating from react-native-biometrics
 
 Coming from `react-native-biometrics` (SelfLender) or `@sbaiahmed1/react-native-biometrics`? See the full **[Migration Guide](./MIGRATION.md)** with API mapping and code examples.
+
+## 📝 Changelog
+
+See **[CHANGELOG.md](./CHANGELOG.md)** for the full version history.
 
 ## License
 
