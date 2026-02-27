@@ -33,13 +33,18 @@
 | RSA 2048 key pair generation                              | ✅  |   ✅    |
 | Multiple key aliases                                      | ✅  |   ✅    |
 | Biometric-protected payload signing                       | ✅  |   ✅    |
+| **Encrypted biometric storage** 🆕                        | ✅  |   ✅    |
 | Biometric change detection                                | ✅  |   ✅    |
 | Biometric change event listener                           | ✅  |   ✅    |
 | Device integrity (root/jailbreak detection)               | ✅  |   ✅    |
+| **Screen capture protection** 🆕                          | ✅  |   ✅    |
+| **Device diagnostics** 🆕                                 | ✅  |   ✅    |
 | Device credential fallback control                        | ✅  |   ✅    |
 | `useBiometrics()` React Hook                              | ✅  |   ✅    |
+| **`useBiometricGuard()` Hook** 🆕                         | ✅  |   ✅    |
 | Expo Config Plugin                                        | ✅  |   ✅    |
 | New Architecture (TurboModules)                           | ✅  |   ✅    |
+| **GitHub Actions CI** 🆕                                  | ✅  |   ✅    |
 
 ## 📦 Installation
 
@@ -340,6 +345,12 @@ switch (level) {
 | `isBiometricChanged(savedHash)` | `Promise<boolean>`               | Check if biometrics changed since saved hash |
 | `getDeviceIntegrity()`          | `Promise<DeviceIntegrityResult>` | Root/jailbreak detection + risk level        |
 | `onBiometricChange(callback)`   | `() => void`                     | Subscribe to enrollment changes              |
+| `secureStore(key, value, msg?)` | `Promise<boolean>`               | Store value with biometric encryption        |
+| `secureGet(key, msg?)`          | `Promise<string \| null>`        | Get biometric-protected value                |
+| `secureDelete(key)`             | `Promise<boolean>`               | Delete a stored value                        |
+| `secureGetAllKeys()`            | `Promise<string[]>`              | List all secure storage keys                 |
+| `setScreenCaptureProtection(b)` | `Promise<boolean>`               | Prevent screenshots/recording                |
+| `getDiagnosticInfo()`           | `Promise<DiagnosticInfo>`        | Device + biometric capabilities              |
 
 ### AuthOptions
 
@@ -378,6 +389,17 @@ switch (level) {
 **`SecurityLevel`**: `NONE (0)` | `SECRET (1)` | `BIOMETRIC_WEAK (2)` | `BIOMETRIC_STRONG (3)`
 
 **`RiskLevel`**: `NONE` | `LOW` | `MEDIUM` | `HIGH`
+
+### Hooks
+
+| Hook                      | Description                                    |
+| ------------------------- | ---------------------------------------------- |
+| `useBiometrics()`         | Complete biometrics interface with auto-status |
+| `useBiometricGuard(opts)` | Screen-level auth protection                   |
+
+## 🤝 Contributing
+
+See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for setup and guidelines.
 
 ## 🔄 Migrating from react-native-biometrics
 

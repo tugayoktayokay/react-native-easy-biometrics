@@ -3,6 +3,7 @@
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <React/RCTConvert.h>
 #import <Security/Security.h>
+#import <sys/utsname.h>
 
 #ifdef RCT_NEW_ARCH_ENABLED
 #import "RNEasyBiometricsSpec.h"
@@ -445,6 +446,265 @@ RCT_REMAP_METHOD(deleteKeys,
   NSData *tag = [self keychainTagForAlias:alias];
   BOOL deleted = [self deleteKeysWithTag:tag];
   resolve(@(deleted));
+}
+
+// ─── Encrypted Storage ────────────────────────────────────────
+
+static NSString *const kSecureStoreServicePrefix =
+    @"com.easybiometrics.securestore.";
+
+RCT_REMAP_METHOD(
+    secureStore,
+    secureStoreKey : (NSString *)key secureStoreValue : (NSString *)
+        value secureStorePrompt : (NSString *)
+            promptMessage secureStoreWithResolver : (RCTPromiseResolveBlock)
+                resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *service =
+            [kSecureStoreServicePrefix stringByAppendingString:key];
+
+        // Delete existing item first
+        NSDictionary *deleteQuery = @{
+          (__bridge NSString *)
+          kSecClass : (__bridge NSString *)kSecClassGenericPassword,
+          (__bridge NSString *)kSecAttrService : service,
+        };
+        SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
+
+        // Create access control with biometric protection
+        CFErrorRef error = NULL;
+        SecAccessControlRef accessControl = SecAccessControlCreateWithFlags(
+            kCFAllocatorDefault,
+            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+            kSecAccessControlBiometryAny, &error);
+
+        if (error != NULL || accessControl == NULL) {
+          reject(@"storage_error", @"Failed to create access control",
+                 (__bridge NSError *)error);
+          return;
+        }
+
+        NSData *valueData = [value dataUsingEncoding:NSUTF8StringEncoding];
+
+        LAContext *context = [[LAContext alloc] init];
+        context.localizedReason =
+            promptMessage ?: @"Authenticate to store data";
+
+        NSDictionary *addQuery = @{
+          (__bridge NSString *)
+          kSecClass : (__bridge NSString *)kSecClassGenericPassword,
+          (__bridge NSString *)kSecAttrService : service,
+          (__bridge NSString *)kSecValueData : valueData,
+          (__bridge NSString *)
+          kSecAttrAccessControl : (__bridge id)accessControl,
+          (__bridge NSString *)kSecUseAuthenticationContext : context,
+        };
+
+        OSStatus status = SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
+        CFRelease(accessControl);
+
+        if (status == errSecSuccess) {
+          resolve(@YES);
+        } else {
+          reject(@"storage_error",
+                 [NSString
+                     stringWithFormat:@"Failed to store data: %d", (int)status],
+                 nil);
+        }
+      });
+}
+
+RCT_REMAP_METHOD(
+    secureGet,
+    secureGetKey : (NSString *)key secureGetPrompt : (NSString *)
+        promptMessage secureGetWithResolver : (RCTPromiseResolveBlock)
+            resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *service =
+            [kSecureStoreServicePrefix stringByAppendingString:key];
+
+        NSDictionary *query = @{
+          (__bridge NSString *)
+          kSecClass : (__bridge NSString *)kSecClassGenericPassword,
+          (__bridge NSString *)kSecAttrService : service,
+          (__bridge NSString *)kSecReturnData : @YES,
+          (__bridge NSString *)kSecUseOperationPrompt : promptMessage
+              ?: @"Authenticate to access data",
+        };
+
+        CFTypeRef result = NULL;
+        OSStatus status =
+            SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+
+        if (status == errSecSuccess && result != NULL) {
+          NSData *data = (__bridge_transfer NSData *)result;
+          NSString *value =
+              [[NSString alloc] initWithData:data
+                                    encoding:NSUTF8StringEncoding];
+          resolve(value);
+        } else if (status == errSecItemNotFound) {
+          resolve([NSNull null]);
+        } else {
+          reject(@"storage_error",
+                 [NSString stringWithFormat:@"Failed to retrieve data: %d",
+                                            (int)status],
+                 nil);
+        }
+      });
+}
+
+RCT_REMAP_METHOD(secureDelete,
+                 secureDeleteKey : (NSString *)
+                     key secureDeleteWithResolver : (RCTPromiseResolveBlock)
+                         resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  NSString *service = [kSecureStoreServicePrefix stringByAppendingString:key];
+
+  NSDictionary *query = @{
+    (__bridge NSString *)
+    kSecClass : (__bridge NSString *)kSecClassGenericPassword,
+    (__bridge NSString *)kSecAttrService : service,
+  };
+
+  OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+  resolve(@(status == errSecSuccess || status == errSecItemNotFound));
+}
+
+RCT_REMAP_METHOD(secureGetAllKeys,
+                 secureGetAllKeysWithResolver : (RCTPromiseResolveBlock)
+                     resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  NSDictionary *query = @{
+    (__bridge NSString *)
+    kSecClass : (__bridge NSString *)kSecClassGenericPassword,
+    (__bridge NSString *)kSecReturnAttributes : @YES,
+    (__bridge NSString *)
+    kSecMatchLimit : (__bridge NSString *)kSecMatchLimitAll,
+  };
+
+  CFTypeRef result = NULL;
+  OSStatus status =
+      SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+
+  NSMutableArray *keys = [NSMutableArray array];
+
+  if (status == errSecSuccess && result != NULL) {
+    NSArray *items = (__bridge_transfer NSArray *)result;
+    for (NSDictionary *item in items) {
+      NSString *service = item[(__bridge NSString *)kSecAttrService];
+      if ([service hasPrefix:kSecureStoreServicePrefix]) {
+        NSString *key =
+            [service substringFromIndex:kSecureStoreServicePrefix.length];
+        [keys addObject:key];
+      }
+    }
+  }
+
+  resolve(keys);
+}
+
+// ─── Screen Capture Protection ────────────────────────────────
+
+RCT_REMAP_METHOD(setScreenCaptureProtection,
+                 setScreenCaptureProtectionEnabled : (BOOL)
+                     enabled setScreenCaptureProtectionWithResolver : (
+                         RCTPromiseResolveBlock)
+                         resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    @try {
+      UIWindow *window = [UIApplication sharedApplication].windows.firstObject;
+      if (window) {
+        if (enabled) {
+          UITextField *secureField = [[UITextField alloc] init];
+          secureField.secureTextEntry = YES;
+          secureField.tag = 999888;
+          [window addSubview:secureField];
+          [window.layer.superlayer addSublayer:secureField.layer];
+          [[secureField.layer.sublayers firstObject] addSublayer:window.layer];
+        } else {
+          UIView *secureField = [window viewWithTag:999888];
+          if (secureField) {
+            [secureField removeFromSuperview];
+          }
+        }
+      }
+      resolve(@YES);
+    } @catch (NSException *exception) {
+      reject(@"screen_error", exception.reason, nil);
+    }
+  });
+}
+
+// ─── Diagnostics ──────────────────────────────────────────────
+
+RCT_REMAP_METHOD(getDiagnosticInfo,
+                 getDiagnosticInfoWithResolver : (RCTPromiseResolveBlock)
+                     resolve rejecter : (RCTPromiseRejectBlock)reject) {
+  LAContext *context = [[LAContext alloc] init];
+  NSError *la_error = nil;
+  BOOL canEvaluate =
+      [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics
+                           error:&la_error];
+
+  NSMutableDictionary *result = [NSMutableDictionary dictionary];
+  result[@"platform"] = @"ios";
+
+  struct utsname systemInfo;
+  uname(&systemInfo);
+  result[@"device"] = [NSString stringWithCString:systemInfo.machine
+                                         encoding:NSUTF8StringEncoding];
+  result[@"osVersion"] = [[UIDevice currentDevice] systemVersion];
+  result[@"model"] = [[UIDevice currentDevice] model];
+  result[@"systemName"] = [[UIDevice currentDevice] systemName];
+
+  // Biometric capabilities
+  result[@"hasBiometric"] = @(canEvaluate);
+  if (canEvaluate) {
+    if (@available(iOS 11.0, *)) {
+      result[@"hasFaceID"] = @(context.biometryType == LABiometryTypeFaceID);
+      result[@"hasTouchID"] = @(context.biometryType == LABiometryTypeTouchID);
+    }
+  } else {
+    result[@"hasFaceID"] = @NO;
+    result[@"hasTouchID"] = @NO;
+  }
+
+  // Secure Enclave check
+  BOOL hasSecureEnclave = NO;
+  CFErrorRef seError = NULL;
+  SecAccessControlRef seAccess = SecAccessControlCreateWithFlags(
+      kCFAllocatorDefault, kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+      kSecAccessControlPrivateKeyUsage, &seError);
+  if (seAccess != NULL) {
+    NSDictionary *seAttrs = @{
+      (__bridge NSString *)
+      kSecAttrKeyType : (__bridge NSString *)kSecAttrKeyTypeECSECPrimeRandom,
+      (__bridge NSString *)kSecAttrKeySizeInBits : @256,
+      (__bridge NSString *)
+      kSecAttrTokenID : (__bridge NSString *)kSecAttrTokenIDSecureEnclave,
+      (__bridge NSString *)kSecPrivateKeyAttrs : @{
+        (__bridge NSString *)kSecAttrIsPermanent : @NO,
+        (__bridge NSString *)kSecAttrAccessControl : (__bridge id)seAccess,
+      },
+    };
+    SecKeyRef testKey =
+        SecKeyCreateRandomKey((__bridge CFDictionaryRef)seAttrs, &seError);
+    if (testKey != NULL) {
+      hasSecureEnclave = YES;
+      CFRelease(testKey);
+    }
+    CFRelease(seAccess);
+  }
+  result[@"hasSecureEnclave"] = @(hasSecureEnclave);
+
+  // Passcode set
+  LAContext *passcodeCtx = [[LAContext alloc] init];
+  NSError *passcodeError = nil;
+  result[@"hasPasscode"] =
+      @([passcodeCtx canEvaluatePolicy:LAPolicyDeviceOwnerAuthentication
+                                 error:&passcodeError]);
+
+  resolve(result);
 }
 
 // ─── Device Integrity ─────────────────────────────────────────

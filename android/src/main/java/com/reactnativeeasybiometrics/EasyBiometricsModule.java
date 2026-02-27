@@ -596,6 +596,284 @@ public class EasyBiometricsModule extends ReactContextBaseJavaModule {
         return false;
     }
 
+    // ─── Encrypted Storage ────────────────────────────────────────
+
+    private static final String SECURE_STORE_KEY_ALIAS = "com.easybiometrics.securestore";
+    private static final String SECURE_STORE_PREFS = "com.easybiometrics.securestore.data";
+
+    private javax.crypto.SecretKey getOrCreateSecureStoreKey() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+        keyStore.load(null);
+
+        if (keyStore.containsAlias(SECURE_STORE_KEY_ALIAS)) {
+            return ((KeyStore.SecretKeyEntry) keyStore.getEntry(SECURE_STORE_KEY_ALIAS, null)).getSecretKey();
+        }
+
+        javax.crypto.KeyGenerator keyGenerator = javax.crypto.KeyGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
+        );
+
+        KeyGenParameterSpec.Builder builder = new KeyGenParameterSpec.Builder(
+            SECURE_STORE_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT
+        )
+        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+        .setKeySize(256)
+        .setUserAuthenticationRequired(true);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setUserAuthenticationParameters(0,
+                KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            builder.setInvalidatedByBiometricEnrollment(false);
+        }
+
+        keyGenerator.init(builder.build());
+        return keyGenerator.generateKey();
+    }
+
+    @ReactMethod
+    public void secureStore(final String key, final String value, final String promptMessage, final Promise promise) {
+        UiThreadUtil.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Activity activity = getCurrentActivity();
+                    if (activity == null) {
+                        promise.reject("storage_error", "Activity is null");
+                        return;
+                    }
+
+                    javax.crypto.SecretKey secretKey = getOrCreateSecureStoreKey();
+                    final javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+                    cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secretKey);
+
+                    BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
+
+                    ReactApplicationContext context = getReactApplicationContext();
+                    Executor mainExecutor = ContextCompat.getMainExecutor(context);
+
+                    BiometricPrompt biometricPrompt = new BiometricPrompt(
+                        (FragmentActivity) activity,
+                        mainExecutor,
+                        new BiometricPrompt.AuthenticationCallback() {
+                            @Override
+                            public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                                promise.reject(mapAndroidErrorCode(errorCode), errString.toString());
+                            }
+
+                            @Override
+                            public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                                try {
+                                    javax.crypto.Cipher authedCipher = result.getCryptoObject().getCipher();
+                                    byte[] encrypted = authedCipher.doFinal(value.getBytes("UTF-8"));
+                                    byte[] iv = authedCipher.getIV();
+
+                                    // Store IV + encrypted data together
+                                    byte[] combined = new byte[iv.length + encrypted.length];
+                                    System.arraycopy(iv, 0, combined, 0, iv.length);
+                                    System.arraycopy(encrypted, 0, combined, iv.length, encrypted.length);
+
+                                    String encoded = Base64.encodeToString(combined, Base64.NO_WRAP);
+
+                                    android.content.SharedPreferences prefs = getReactApplicationContext()
+                                        .getSharedPreferences(SECURE_STORE_PREFS, android.content.Context.MODE_PRIVATE);
+                                    prefs.edit().putString(key, encoded).apply();
+
+                                    promise.resolve(true);
+                                } catch (Exception e) {
+                                    promise.reject("storage_error", e.getMessage());
+                                }
+                            }
+                        }
+                    );
+
+                    BiometricPrompt.PromptInfo promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Secure Storage")
+                        .setSubtitle(promptMessage != null ? promptMessage : "Authenticate to store data")
+                        .setNegativeButtonText("Cancel")
+                        .build();
+
+                    biometricPrompt.authenticate(promptInfo, cryptoObject);
+                } catch (Exception e) {
+                    promise.reject("storage_error", e.getMessage());
+                }
+            }
+        });
+    }
+
+    @ReactMethod
+    public void secureGet(final String key, final String promptMessage, final Promise promise) {
+        UiThreadUtil.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Activity activity = getCurrentActivity();
+                    if (activity == null) {
+                        promise.reject("storage_error", "Activity is null");
+                        return;
+                    }
+
+                    android.content.SharedPreferences prefs = getReactApplicationContext()
+                        .getSharedPreferences(SECURE_STORE_PREFS, android.content.Context.MODE_PRIVATE);
+                    String encoded = prefs.getString(key, null);
+
+                    if (encoded == null) {
+                        promise.resolve(null);
+                        return;
+                    }
+
+                    byte[] combined = Base64.decode(encoded, Base64.NO_WRAP);
+                    // GCM IV is always 12 bytes
+                    byte[] iv = new byte[12];
+                    byte[] encrypted = new byte[combined.length - 12];
+                    System.arraycopy(combined, 0, iv, 0, 12);
+                    System.arraycopy(combined, 12, encrypted, 0, encrypted.length);
+
+                    javax.crypto.SecretKey secretKey = getOrCreateSecureStoreKey();
+                    final javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+                    javax.crypto.spec.GCMParameterSpec gcmSpec = new javax.crypto.spec.GCMParameterSpec(128, iv);
+                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secretKey, gcmSpec);
+
+                    BiometricPrompt.CryptoObject cryptoObject = new BiometricPrompt.CryptoObject(cipher);
+
+                    ReactApplicationContext context = getReactApplicationContext();
+                    Executor mainExecutor = ContextCompat.getMainExecutor(context);
+
+                    BiometricPrompt biometricPrompt = new BiometricPrompt(
+                        (FragmentActivity) activity,
+                        mainExecutor,
+                        new BiometricPrompt.AuthenticationCallback() {
+                            @Override
+                            public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                                promise.reject(mapAndroidErrorCode(errorCode), errString.toString());
+                            }
+
+                            @Override
+                            public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                                try {
+                                    javax.crypto.Cipher authedCipher = result.getCryptoObject().getCipher();
+                                    byte[] decrypted = authedCipher.doFinal(encrypted);
+                                    promise.resolve(new String(decrypted, "UTF-8"));
+                                } catch (Exception e) {
+                                    promise.reject("storage_error", "Decryption failed: " + e.getMessage());
+                                }
+                            }
+                        }
+                    );
+
+                    BiometricPrompt.PromptInfo promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("Secure Storage")
+                        .setSubtitle(promptMessage != null ? promptMessage : "Authenticate to access data")
+                        .setNegativeButtonText("Cancel")
+                        .build();
+
+                    biometricPrompt.authenticate(promptInfo, cryptoObject);
+                } catch (Exception e) {
+                    promise.reject("storage_error", e.getMessage());
+                }
+            }
+        });
+    }
+
+    @ReactMethod
+    public void secureDelete(final String key, final Promise promise) {
+        try {
+            android.content.SharedPreferences prefs = getReactApplicationContext()
+                .getSharedPreferences(SECURE_STORE_PREFS, android.content.Context.MODE_PRIVATE);
+            prefs.edit().remove(key).apply();
+            promise.resolve(true);
+        } catch (Exception e) {
+            promise.reject("storage_error", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void secureGetAllKeys(final Promise promise) {
+        try {
+            android.content.SharedPreferences prefs = getReactApplicationContext()
+                .getSharedPreferences(SECURE_STORE_PREFS, android.content.Context.MODE_PRIVATE);
+            WritableArray keys = Arguments.createArray();
+            for (String key : prefs.getAll().keySet()) {
+                keys.pushString(key);
+            }
+            promise.resolve(keys);
+        } catch (Exception e) {
+            promise.reject("storage_error", e.getMessage());
+        }
+    }
+
+    // ─── Screen Capture Protection ────────────────────────────────
+
+    @ReactMethod
+    public void setScreenCaptureProtection(final boolean enabled, final Promise promise) {
+        UiThreadUtil.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Activity activity = getCurrentActivity();
+                    if (activity == null) {
+                        promise.reject("screen_error", "Activity is null");
+                        return;
+                    }
+                    if (enabled) {
+                        activity.getWindow().setFlags(
+                            android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                            android.view.WindowManager.LayoutParams.FLAG_SECURE
+                        );
+                    } else {
+                        activity.getWindow().clearFlags(
+                            android.view.WindowManager.LayoutParams.FLAG_SECURE
+                        );
+                    }
+                    promise.resolve(true);
+                } catch (Exception e) {
+                    promise.reject("screen_error", e.getMessage());
+                }
+            }
+        });
+    }
+
+    // ─── Diagnostics ──────────────────────────────────────────────
+
+    @ReactMethod
+    public void getDiagnosticInfo(final Promise promise) {
+        try {
+            WritableMap result = Arguments.createMap();
+            result.putString("platform", "android");
+            result.putString("osVersion", Build.VERSION.RELEASE);
+            result.putInt("sdkVersion", Build.VERSION.SDK_INT);
+            result.putString("device", Build.MANUFACTURER + " " + Build.MODEL);
+            result.putString("brand", Build.BRAND);
+            result.putString("model", Build.MODEL);
+
+            // Biometric capabilities
+            BiometricManager biometricManager = BiometricManager.from(getReactApplicationContext());
+            int canStrong = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG);
+            int canWeak = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK);
+            int canCredential = biometricManager.canAuthenticate(BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+
+            result.putBoolean("hasBiometricStrong", canStrong == BiometricManager.BIOMETRIC_SUCCESS);
+            result.putBoolean("hasBiometricWeak", canWeak == BiometricManager.BIOMETRIC_SUCCESS);
+            result.putBoolean("hasDeviceCredential", canCredential == BiometricManager.BIOMETRIC_SUCCESS);
+
+            // Hardware features
+            PackageManager pm = getReactApplicationContext().getPackageManager();
+            result.putBoolean("hasFingerprint", pm.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT));
+            result.putBoolean("hasFaceDetect", pm.hasSystemFeature("android.hardware.biometrics.face"));
+            result.putBoolean("hasIris", pm.hasSystemFeature("android.hardware.biometrics.iris"));
+            result.putBoolean("hasStrongBox", Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                pm.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE));
+
+            promise.resolve(result);
+        } catch (Exception e) {
+            promise.reject("diagnostic_error", e.getMessage());
+        }
+    }
+
     // ─── Private Helpers ───────────────────────────────────────
 
     private boolean deleteKeysByAlias(String alias) {

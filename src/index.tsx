@@ -176,6 +176,50 @@ export interface DeviceIntegrityResult {
   error?: string;
 }
 
+/**
+ * Diagnostic information about the device and its biometric capabilities.
+ */
+export interface DiagnosticInfo {
+  /** Platform: 'ios' or 'android' */
+  platform: 'ios' | 'android';
+  /** OS version string */
+  osVersion: string;
+  /** Device identifier */
+  device: string;
+  /** Device model */
+  model: string;
+  /** Whether biometric hardware is available */
+  hasBiometric?: boolean;
+  /** Android only: SDK version number */
+  sdkVersion?: number;
+  /** Android only: Device brand */
+  brand?: string;
+  /** Android only: Has Class 3 biometric */
+  hasBiometricStrong?: boolean;
+  /** Android only: Has Class 2 biometric */
+  hasBiometricWeak?: boolean;
+  /** Android only: Has device credential */
+  hasDeviceCredential?: boolean;
+  /** Android only: Has fingerprint sensor */
+  hasFingerprint?: boolean;
+  /** Android only: Has face recognition */
+  hasFaceDetect?: boolean;
+  /** Android only: Has iris scanner */
+  hasIris?: boolean;
+  /** Android only: Has StrongBox */
+  hasStrongBox?: boolean;
+  /** iOS only: Has Face ID */
+  hasFaceID?: boolean;
+  /** iOS only: Has Touch ID */
+  hasTouchID?: boolean;
+  /** iOS only: Has Secure Enclave */
+  hasSecureEnclave?: boolean;
+  /** iOS only: Has passcode set */
+  hasPasscode?: boolean;
+  /** iOS only: System name */
+  systemName?: string;
+}
+
 // ─── Core API ────────────────────────────────────────────────────
 
 /**
@@ -517,6 +561,158 @@ const onBiometricChange = (
   };
 };
 
+// ─── Encrypted Storage ──────────────────────────────────────────
+
+/**
+ * Store a value securely with biometric protection.
+ * Data is encrypted with AES-256-GCM (Android) or Keychain with biometric ACL (iOS).
+ *
+ * @param key - Storage key identifier
+ * @param value - String value to store
+ * @param promptMessage - Optional biometric prompt message
+ */
+const secureStore = async (
+  key: string,
+  value: string,
+  promptMessage?: string
+): Promise<boolean> => {
+  return RNBiometricsNative.secureStore(
+    key,
+    value,
+    promptMessage || 'Authenticate to store data'
+  );
+};
+
+/**
+ * Retrieve a securely stored value. Requires biometric authentication.
+ *
+ * @param key - Storage key identifier
+ * @param promptMessage - Optional biometric prompt message
+ * @returns The stored value, or null if not found
+ */
+const secureGet = async (
+  key: string,
+  promptMessage?: string
+): Promise<string | null> => {
+  return RNBiometricsNative.secureGet(
+    key,
+    promptMessage || 'Authenticate to access data'
+  );
+};
+
+/**
+ * Delete a securely stored value.
+ *
+ * @param key - Storage key identifier
+ */
+const secureDelete = async (key: string): Promise<boolean> => {
+  return RNBiometricsNative.secureDelete(key);
+};
+
+/**
+ * Get all keys in the secure storage.
+ */
+const secureGetAllKeys = async (): Promise<string[]> => {
+  return RNBiometricsNative.secureGetAllKeys();
+};
+
+// ─── Screen Capture Protection ──────────────────────────────────
+
+/**
+ * Enable or disable screen capture protection.
+ * When enabled, screenshots and screen recording will show a blank screen.
+ *
+ * @param enabled - Whether to enable protection
+ */
+const setScreenCaptureProtection = async (
+  enabled: boolean
+): Promise<boolean> => {
+  return RNBiometricsNative.setScreenCaptureProtection(enabled);
+};
+
+// ─── Diagnostics ────────────────────────────────────────────────
+
+/**
+ * Get detailed diagnostic information about the device's biometric capabilities.
+ * Useful for debugging and support.
+ *
+ * @example
+ * ```ts
+ * const info = await RNBiometrics.getDiagnosticInfo();
+ * console.log(info.platform, info.device, info.osVersion);
+ * console.log('Face ID:', info.hasFaceID);
+ * console.log('StrongBox:', info.hasStrongBox);
+ * ```
+ */
+const getDiagnosticInfo = async (): Promise<DiagnosticInfo> => {
+  return RNBiometricsNative.getDiagnosticInfo() as Promise<DiagnosticInfo>;
+};
+
+// ─── useBiometricGuard Hook ─────────────────────────────────────
+
+/**
+ * React Hook that requires biometric authentication before granting access.
+ * Useful for protecting sensitive screens.
+ *
+ * @example
+ * ```tsx
+ * const { isAuthenticated, error, retry } = useBiometricGuard({
+ *   promptMessage: 'Verify identity to view this screen',
+ * });
+ *
+ * if (!isAuthenticated) return <LockScreen onRetry={retry} error={error} />;
+ * return <SensitiveContent />;
+ * ```
+ */
+export const useBiometricGuard = (options: {
+  promptMessage: string;
+  promptTitle?: string;
+  autoPrompt?: boolean;
+}) => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const doAuth = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await authenticate({
+        promptMessage: options.promptMessage,
+        promptTitle: options.promptTitle,
+      });
+      if (result.success) {
+        setIsAuthenticated(true);
+      } else {
+        setError(result.message || 'Authentication failed');
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [options.promptMessage, options.promptTitle]);
+
+  useEffect(() => {
+    if (options.autoPrompt !== false) {
+      doAuth();
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  return {
+    /** Whether the user has been authenticated */
+    isAuthenticated,
+    /** Error message if authentication failed */
+    error,
+    /** Whether authentication is in progress */
+    loading,
+    /** Retry authentication */
+    retry: doAuth,
+  };
+};
+
 // ─── React Hook ─────────────────────────────────────────────────
 
 /**
@@ -627,6 +823,15 @@ const RNBiometrics = {
   getDeviceIntegrity,
   // Biometric event listener
   onBiometricChange,
+  // Encrypted storage
+  secureStore,
+  secureGet,
+  secureDelete,
+  secureGetAllKeys,
+  // Screen capture protection
+  setScreenCaptureProtection,
+  // Diagnostics
+  getDiagnosticInfo,
 };
 
 export default RNBiometrics;

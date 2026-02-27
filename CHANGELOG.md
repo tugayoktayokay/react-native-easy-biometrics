@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.1.0] — 2026-02-27
+
+### Added
+
+- **Encrypted biometric storage** — `secureStore()`, `secureGet()`, `secureDelete()`, `secureGetAllKeys()`
+  - Android: AES-256-GCM with BiometricPrompt-protected key in AndroidKeyStore
+  - iOS: Keychain with `kSecAccessControlBiometryAny` access control
+- **Screen capture protection** — `setScreenCaptureProtection(true/false)`
+  - Android: `FLAG_SECURE` on window
+  - iOS: `UITextField` secure text field trick
+- **Device diagnostics** — `getDiagnosticInfo()` returns 20+ fields
+  - Platform, OS version, device model, biometric capabilities, StrongBox/Secure Enclave status
+- **`useBiometricGuard()` hook** — screen-level auth protection with auto-prompt and retry
+- **GitHub Actions CI** — automated lint, typecheck, build on Node 18/20
+- **CONTRIBUTING.md** — dev setup, PR guidelines, commit conventions
+- `DiagnosticInfo` type with platform-specific fields
+
 ## [3.0.0] — 2026-02-27
 
 ### Added
