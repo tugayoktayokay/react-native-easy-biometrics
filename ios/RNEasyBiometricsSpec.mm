@@ -33,6 +33,13 @@ __hostFunction_NativeEasyBiometricsSpecJSI_getSecurityLevel(
 }
 
 static facebook::jsi::Value
+__hostFunction_NativeEasyBiometricsSpecJSI_getBiometricStateHash(
+    facebook::jsi::Runtime &rt, TurboModule &turboModule,
+    const facebook::jsi::Value *args, size_t count) {
+  return facebook::jsi::Value::undefined();
+}
+
+static facebook::jsi::Value
 __hostFunction_NativeEasyBiometricsSpecJSI_requestBioAuth(
     facebook::jsi::Runtime &rt, TurboModule &turboModule,
     const facebook::jsi::Value *args, size_t count) {
@@ -81,6 +88,55 @@ __hostFunction_NativeEasyBiometricsSpecJSI_deleteKeys(
   return facebook::jsi::Value::undefined();
 }
 
+static facebook::jsi::Value
+__hostFunction_NativeEasyBiometricsSpecJSI_secureStore(
+    facebook::jsi::Runtime &rt, TurboModule &turboModule,
+    const facebook::jsi::Value *args, size_t count) {
+  return facebook::jsi::Value::undefined();
+}
+
+static facebook::jsi::Value
+__hostFunction_NativeEasyBiometricsSpecJSI_secureGet(
+    facebook::jsi::Runtime &rt, TurboModule &turboModule,
+    const facebook::jsi::Value *args, size_t count) {
+  return facebook::jsi::Value::undefined();
+}
+
+static facebook::jsi::Value
+__hostFunction_NativeEasyBiometricsSpecJSI_secureDelete(
+    facebook::jsi::Runtime &rt, TurboModule &turboModule,
+    const facebook::jsi::Value *args, size_t count) {
+  return facebook::jsi::Value::undefined();
+}
+
+static facebook::jsi::Value
+__hostFunction_NativeEasyBiometricsSpecJSI_secureGetAllKeys(
+    facebook::jsi::Runtime &rt, TurboModule &turboModule,
+    const facebook::jsi::Value *args, size_t count) {
+  return facebook::jsi::Value::undefined();
+}
+
+static facebook::jsi::Value
+__hostFunction_NativeEasyBiometricsSpecJSI_setScreenCaptureProtection(
+    facebook::jsi::Runtime &rt, TurboModule &turboModule,
+    const facebook::jsi::Value *args, size_t count) {
+  return facebook::jsi::Value::undefined();
+}
+
+static facebook::jsi::Value
+__hostFunction_NativeEasyBiometricsSpecJSI_getDiagnosticInfo(
+    facebook::jsi::Runtime &rt, TurboModule &turboModule,
+    const facebook::jsi::Value *args, size_t count) {
+  return facebook::jsi::Value::undefined();
+}
+
+static facebook::jsi::Value
+__hostFunction_NativeEasyBiometricsSpecJSI_getDeviceIntegrity(
+    facebook::jsi::Runtime &rt, TurboModule &turboModule,
+    const facebook::jsi::Value *args, size_t count) {
+  return facebook::jsi::Value::undefined();
+}
+
 NativeEasyBiometricsSpecJSI::NativeEasyBiometricsSpecJSI(
     const ObjCTurboModule::InitParams &params)
     : ObjCTurboModule(params) {
@@ -93,6 +149,8 @@ NativeEasyBiometricsSpecJSI::NativeEasyBiometricsSpecJSI(
       MethodMetadata{1, __hostFunction_NativeEasyBiometricsSpecJSI_isEnrolled};
   methodMap_["getSecurityLevel"] = MethodMetadata{
       1, __hostFunction_NativeEasyBiometricsSpecJSI_getSecurityLevel};
+  methodMap_["getBiometricStateHash"] = MethodMetadata{
+      1, __hostFunction_NativeEasyBiometricsSpecJSI_getBiometricStateHash};
   methodMap_["requestBioAuth"] = MethodMetadata{
       3, __hostFunction_NativeEasyBiometricsSpecJSI_requestBioAuth};
   methodMap_["authenticate"] = MethodMetadata{
@@ -107,6 +165,20 @@ NativeEasyBiometricsSpecJSI::NativeEasyBiometricsSpecJSI(
       1, __hostFunction_NativeEasyBiometricsSpecJSI_biometricKeysExist};
   methodMap_["deleteKeys"] =
       MethodMetadata{1, __hostFunction_NativeEasyBiometricsSpecJSI_deleteKeys};
+  methodMap_["secureStore"] =
+      MethodMetadata{4, __hostFunction_NativeEasyBiometricsSpecJSI_secureStore};
+  methodMap_["secureGet"] =
+      MethodMetadata{3, __hostFunction_NativeEasyBiometricsSpecJSI_secureGet};
+  methodMap_["secureDelete"] = MethodMetadata{
+      2, __hostFunction_NativeEasyBiometricsSpecJSI_secureDelete};
+  methodMap_["secureGetAllKeys"] = MethodMetadata{
+      1, __hostFunction_NativeEasyBiometricsSpecJSI_secureGetAllKeys};
+  methodMap_["setScreenCaptureProtection"] = MethodMetadata{
+      2, __hostFunction_NativeEasyBiometricsSpecJSI_setScreenCaptureProtection};
+  methodMap_["getDiagnosticInfo"] = MethodMetadata{
+      1, __hostFunction_NativeEasyBiometricsSpecJSI_getDiagnosticInfo};
+  methodMap_["getDeviceIntegrity"] = MethodMetadata{
+      1, __hostFunction_NativeEasyBiometricsSpecJSI_getDeviceIntegrity};
 }
 
 } // namespace react

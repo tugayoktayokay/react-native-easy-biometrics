@@ -374,17 +374,41 @@ public class EasyBiometricsModule extends ReactContextBaseJavaModule {
                 builder.setInvalidatedByBiometricEnrollment(true);
             }
 
-            // Try StrongBox for EC keys (hardware-backed)
+            KeyPair keyPair = null;
+
+            // Try StrongBox for EC keys first, fall back to TEE if it fails
             if (isEC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 try {
-                    builder.setIsStrongBoxBacked(true);
-                } catch (Exception ignored) {
-                    // StrongBox not available, fall back to TEE
+                    KeyGenParameterSpec.Builder strongBoxBuilder = new KeyGenParameterSpec.Builder(
+                        keyAlias,
+                        KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY
+                    )
+                    .setDigests(KeyProperties.DIGEST_SHA256)
+                    .setUserAuthenticationRequired(true)
+                    .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
+                    .setIsStrongBoxBacked(true);
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        strongBoxBuilder.setInvalidatedByBiometricEnrollment(true);
+                    }
+
+                    keyPairGenerator.initialize(strongBoxBuilder.build());
+                    keyPair = keyPairGenerator.generateKeyPair();
+                } catch (Exception strongBoxError) {
+                    // StrongBox not available or failed, will retry with TEE below
+                    keyPair = null;
+                    // Need to delete any partial key that may have been created
+                    deleteKeysByAlias(keyAlias);
+                    // Re-get the generator instance
+                    keyPairGenerator = KeyPairGenerator.getInstance(algorithm, "AndroidKeyStore");
                 }
             }
 
-            keyPairGenerator.initialize(builder.build());
-            KeyPair keyPair = keyPairGenerator.generateKeyPair();
+            // Fallback: generate without StrongBox (TEE-backed)
+            if (keyPair == null) {
+                keyPairGenerator.initialize(builder.build());
+                keyPair = keyPairGenerator.generateKeyPair();
+            }
 
             PublicKey publicKey = keyPair.getPublic();
             String base64PublicKey = Base64.encodeToString(publicKey.getEncoded(), Base64.NO_WRAP);

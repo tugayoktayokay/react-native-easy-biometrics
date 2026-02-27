@@ -191,7 +191,7 @@ RCT_REMAP_METHOD(
   dispatch_async(
       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         LAContext *context = [[LAContext alloc] init];
-        _context = context;
+        self->_context = context;
 
         if (fallbackLabel != nil) {
           if ([fallbackLabel length] == 0) {
@@ -220,7 +220,7 @@ RCT_REMAP_METHOD(
              evaluatePolicy:localAuthPolicy
             localizedReason:message
                       reply:^(BOOL success, NSError *biometricError) {
-                        _context = nil;
+                        self->_context = nil;
 
                         if (success) {
                           resolve(@(YES));
@@ -258,54 +258,74 @@ RCT_REMAP_METHOD(
         [self deleteKeysWithTag:tag];
 
         BOOL isEC = [keyType isEqualToString:@"ec256"];
-
         CFErrorRef error = NULL;
-        SecAccessControlCreateFlags flags = kSecAccessControlBiometryAny;
-        if (isEC) {
-          flags |= kSecAccessControlPrivateKeyUsage;
-        }
-        SecAccessControlRef accessControl = SecAccessControlCreateWithFlags(
-            kCFAllocatorDefault,
-            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, flags, &error);
-
-        if (error != NULL || accessControl == NULL) {
-          reject(@"key_error", @"Failed to create access control",
-                 (__bridge NSError *)error);
-          return;
-        }
 
         NSMutableDictionary *privateKeyAttrs = [@{
           (__bridge NSString *)kSecAttrIsPermanent : @YES,
           (__bridge NSString *)kSecAttrApplicationTag : tag,
-          (__bridge NSString *)
-          kSecAttrAccessControl : (__bridge id)accessControl,
         } mutableCopy];
 
-        // EC256 can use Secure Enclave
+        SecAccessControlRef accessControl = NULL;
+
         if (isEC) {
-          privateKeyAttrs[(__bridge NSString *)kSecAttrTokenID] =
-              (__bridge NSString *)kSecAttrTokenIDSecureEnclave;
+          // EC256: Secure Enclave strictly requires access control
+          // with at least PrivateKeyUsage during key creation.
+          // Biometric auth is enforced at signing time.
+          accessControl = SecAccessControlCreateWithFlags(
+              kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+              kSecAccessControlPrivateKeyUsage, &error);
+
+          if (error != NULL || accessControl == NULL) {
+            reject(@"key_error", @"Failed to create access control for EC",
+                   (__bridge NSError *)error);
+            return;
+          }
+          privateKeyAttrs[(__bridge NSString *)kSecAttrAccessControl] =
+              (__bridge id)accessControl;
+        } else {
+          // RSA: add access control with biometric requirement
+          accessControl = SecAccessControlCreateWithFlags(
+              kCFAllocatorDefault,
+              kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+              kSecAccessControlBiometryAny, &error);
+          if (error != NULL || accessControl == NULL) {
+            reject(@"key_error", @"Failed to create access control",
+                   (__bridge NSError *)error);
+            return;
+          }
+          privateKeyAttrs[(__bridge NSString *)kSecAttrAccessControl] =
+              (__bridge id)accessControl;
         }
 
-        NSDictionary *attributes = @{
+        NSMutableDictionary *attributes = [@{
           (__bridge NSString *)kSecAttrKeyType : isEC
               ? (__bridge NSString *)kSecAttrKeyTypeECSECPrimeRandom
               : (__bridge NSString *)kSecAttrKeyTypeRSA,
           (__bridge NSString *)kSecAttrKeySizeInBits : isEC ? @256 : @2048,
           (__bridge NSString *)kSecPrivateKeyAttrs : privateKeyAttrs,
-        };
+        } mutableCopy];
+
+        if (isEC) {
+#if !TARGET_OS_SIMULATOR
+          attributes[(__bridge NSString *)kSecAttrTokenID] =
+              (__bridge NSString *)kSecAttrTokenIDSecureEnclave;
+#endif
+        }
 
         SecKeyRef privateKey =
             SecKeyCreateRandomKey((__bridge CFDictionaryRef)attributes, &error);
 
-        CFRelease(accessControl);
+        if (accessControl != NULL)
+          CFRelease(accessControl);
 
         if (privateKey == NULL) {
           NSString *errorMsg = @"Failed to generate key pair";
           if (error != NULL) {
             NSError *nsError = (__bridge NSError *)error;
-            errorMsg = [NSString stringWithFormat:@"Key generation failed: %@",
-                                                  nsError.localizedDescription];
+            errorMsg = [NSString stringWithFormat:@"Key generation failed: %@ "
+                                                  @"(OSStatus %ld)",
+                                                  nsError.localizedDescription,
+                                                  (long)nsError.code];
           }
           reject(@"key_error", errorMsg, (__bridge NSError *)error);
           return;
@@ -613,21 +633,62 @@ RCT_REMAP_METHOD(setScreenCaptureProtection,
   dispatch_async(dispatch_get_main_queue(), ^{
     @try {
       UIWindow *window = [UIApplication sharedApplication].windows.firstObject;
-      if (window) {
-        if (enabled) {
-          UITextField *secureField = [[UITextField alloc] init];
-          secureField.secureTextEntry = YES;
-          secureField.tag = 999888;
-          [window addSubview:secureField];
-          [window.layer.superlayer addSublayer:secureField.layer];
-          [[secureField.layer.sublayers firstObject] addSublayer:window.layer];
-        } else {
-          UIView *secureField = [window viewWithTag:999888];
-          if (secureField) {
-            [secureField removeFromSuperview];
+      if (!window) {
+        reject(@"screen_error", @"No window found", nil);
+        return;
+      }
+
+      // Use a static variable to keep a strong reference to the secure field
+      static UITextField *secureField = nil;
+
+      if (enabled) {
+        if (secureField == nil) {
+          CGRect screenRect = [[UIScreen mainScreen] bounds];
+          secureField = [[UITextField alloc] initWithFrame:screenRect];
+
+          [secureField setTextAlignment:NSTextAlignmentCenter];
+          [secureField setUserInteractionEnabled:NO];
+          [secureField setSecureTextEntry:YES];
+
+          [window makeKeyAndVisible];
+
+          // Step 1: Add the textField's LAYER to the window's superlayer
+          if (window.layer.superlayer) {
+            [window.layer.superlayer addSublayer:secureField.layer];
+          } else {
+            [window addSubview:secureField];
+          }
+
+          // Step 2: Move window.layer INTO the textField's secure sublayer
+          if (secureField.layer.sublayers.count > 0) {
+            [secureField.layer.sublayers.firstObject addSublayer:window.layer];
           }
         }
+      } else {
+        if (secureField != nil) {
+          [secureField setSecureTextEntry:NO];
+          [secureField setBackgroundColor:[UIColor clearColor]];
+
+          CALayer *textFieldLayer = secureField.layer;
+          CALayer *windowSuperlayer = textFieldLayer.superlayer;
+          CALayer *textFieldSecureSublayer =
+              textFieldLayer.sublayers.firstObject;
+
+          // Restore window.layer to its original position
+          if (textFieldSecureSublayer &&
+              [textFieldSecureSublayer.sublayers containsObject:window.layer]) {
+            [window.layer removeFromSuperlayer];
+            if (windowSuperlayer) {
+              [windowSuperlayer addSublayer:window.layer];
+            }
+          }
+
+          [textFieldLayer removeFromSuperlayer];
+          [secureField removeFromSuperview];
+          secureField = nil;
+        }
       }
+
       resolve(@YES);
     } @catch (NSException *exception) {
       reject(@"screen_error", exception.reason, nil);

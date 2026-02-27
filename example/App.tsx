@@ -6,47 +6,494 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import RNBiometrics, {
   useBiometrics,
   BiometryType,
-  BiometricError,
-  SecurityLevel,
   KeyType,
 } from 'react-native-easy-biometrics';
 
-type LogEntry = {
-  id: number;
-  text: string;
-  type: 'info' | 'success' | 'error';
+// ─── Types ─────────────────────────────────────────────────────
+
+type ResultState = {
+  status: 'idle' | 'loading' | 'success' | 'error';
+  data?: Record<string, any> | string | null;
+  error?: string;
 };
 
-let logId = 0;
+const INITIAL: ResultState = { status: 'idle' };
 
-export default function App() {
+// ─── Result Display ────────────────────────────────────────────
+
+function ResultBox({ result }: { result: ResultState }) {
+  if (result.status === 'idle') return null;
+  if (result.status === 'loading') {
+    return (
+      <View style={rs.box}>
+        <ActivityIndicator size="small" color="#818cf8" />
+      </View>
+    );
+  }
+  const isErr = result.status === 'error';
+  return (
+    <View style={[rs.box, isErr ? rs.errBox : rs.okBox]}>
+      <Text style={[rs.label, isErr ? rs.errLabel : rs.okLabel]}>
+        {isErr ? '✗ ERROR' : '✓ SUCCESS'}
+      </Text>
+      {result.error && <Text style={rs.errText}>{result.error}</Text>}
+      {result.data != null && typeof result.data === 'object'
+        ? Object.entries(result.data).map(([k, v]) => (
+            <View key={k} style={rs.row}>
+              <Text style={rs.key}>{k}</Text>
+              <Text style={rs.val} numberOfLines={2}>
+                {typeof v === 'boolean'
+                  ? v
+                    ? '✓ true'
+                    : '✗ false'
+                  : String(v ?? '—')}
+              </Text>
+            </View>
+          ))
+        : result.data != null && (
+            <Text style={rs.val}>{String(result.data)}</Text>
+          )}
+    </View>
+  );
+}
+
+const rs = StyleSheet.create({
+  box: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  okBox: {
+    borderColor: 'rgba(74,222,128,0.3)',
+    backgroundColor: 'rgba(74,222,128,0.05)',
+  },
+  errBox: {
+    borderColor: 'rgba(248,113,113,0.3)',
+    backgroundColor: 'rgba(248,113,113,0.05)',
+  },
+  label: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  okLabel: { color: '#4ade80' },
+  errLabel: { color: '#f87171' },
+  errText: {
+    color: '#fca5a5',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 3,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  key: { color: '#94a3b8', fontSize: 13, flex: 1 },
+  val: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    flex: 1.5,
+    textAlign: 'right',
+  },
+});
+
+// ─── Buttons ───────────────────────────────────────────────────
+
+function ActionButton({
+  label,
+  icon,
+  onPress,
+  color = '#4f46e5',
+  compact = false,
+  disabled = false,
+}: {
+  label: string;
+  icon: string;
+  onPress: () => void;
+  color?: string;
+  compact?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      style={[
+        ab.btn,
+        { backgroundColor: color },
+        compact && ab.compact,
+        disabled && ab.disabled,
+      ]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.7}
+    >
+      <Text style={ab.icon}>{icon}</Text>
+      <Text style={ab.text}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const ab = StyleSheet.create({
+  btn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 6,
+    gap: 8,
+  },
+  compact: { padding: 10, borderRadius: 10 },
+  disabled: { opacity: 0.4 },
+  icon: { fontSize: 16 },
+  text: { color: '#fff', fontSize: 15, fontWeight: '600' },
+});
+
+function ButtonRow({ children }: { children: React.ReactNode }) {
+  return <View style={{ flexDirection: 'row', gap: 6 }}>{children}</View>;
+}
+
+function SmallButton({
+  label,
+  icon,
+  onPress,
+  color = '#334155',
+}: {
+  label: string;
+  icon: string;
+  onPress: () => void;
+  color?: string;
+}) {
+  return (
+    <TouchableOpacity
+      style={[smb.btn, { backgroundColor: color }]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <Text style={smb.icon}>{icon}</Text>
+      <Text style={smb.text}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const smb = StyleSheet.create({
+  btn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    borderRadius: 10,
+    gap: 4,
+    marginBottom: 6,
+  },
+  icon: { fontSize: 13 },
+  text: { color: '#cbd5e1', fontSize: 13, fontWeight: '600' },
+});
+
+// ─── Feature Card ──────────────────────────────────────────────
+
+function FeatureCard({
+  title,
+  badge,
+  children,
+}: {
+  title: string;
+  badge?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={fc.card}>
+      <View style={fc.header}>
+        <Text style={fc.title}>{title}</Text>
+        {badge && (
+          <View style={fc.badge}>
+            <Text style={fc.badgeText}>{badge}</Text>
+          </View>
+        )}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+const fc = StyleSheet.create({
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  title: { fontSize: 16, fontWeight: '700', color: '#e2e8f0' },
+  badge: {
+    backgroundColor: 'rgba(99,102,241,0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  badgeText: { color: '#818cf8', fontSize: 11, fontWeight: '700' },
+});
+
+// ─── About Screen ──────────────────────────────────────────────
+
+function LinkCard({
+  icon,
+  title,
+  subtitle,
+  url,
+}: {
+  icon: string;
+  title: string;
+  subtitle: string;
+  url: string;
+}) {
+  return (
+    <TouchableOpacity
+      style={lc.card}
+      onPress={() => Linking.openURL(url)}
+      activeOpacity={0.7}
+    >
+      <Text style={lc.icon}>{icon}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={lc.title}>{title}</Text>
+        <Text style={lc.sub}>{subtitle}</Text>
+      </View>
+      <Text style={lc.arrow}>→</Text>
+    </TouchableOpacity>
+  );
+}
+
+const lc = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    gap: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  icon: { fontSize: 28 },
+  title: { fontSize: 16, fontWeight: '700', color: '#e2e8f0' },
+  sub: { fontSize: 13, color: '#64748b', marginTop: 2 },
+  arrow: { fontSize: 18, color: '#475569' },
+});
+
+function AboutScreen() {
+  const features = [
+    { icon: '🔐', label: 'Face ID / Touch ID / Fingerprint' },
+    { icon: '🔑', label: 'RSA 2048 + EC256 (Secure Enclave)' },
+    { icon: '✍️', label: 'Biometric-protected Signatures' },
+    { icon: '💾', label: 'Encrypted Keychain/Keystore Storage' },
+    { icon: '📸', label: 'Screenshot & Screen Recording Protection' },
+    { icon: '🛡️', label: 'Jailbreak / Root Detection' },
+    { icon: '🔄', label: 'Biometric Change Detection' },
+    { icon: '⚡', label: 'TurboModules (New Architecture) Ready' },
+    { icon: '🎣', label: 'React Hook — useBiometrics()' },
+    { icon: '🚫', label: 'AbortSignal Cancel Support' },
+  ];
+
+  return (
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={about.content}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Hero */}
+      <View style={about.hero}>
+        <Text style={about.heroIcon}>🔐</Text>
+        <Text style={about.heroTitle}>Easy Biometrics</Text>
+        <Text style={about.heroVersion}>v3.0.0</Text>
+        <Text style={about.heroDesc}>
+          Production-ready biometric auth for React Native.{'\n'}
+          Supports iOS & Android with Expo compatibility.
+        </Text>
+      </View>
+
+      {/* Links */}
+      <Text style={about.sectionTitle}>LINKS</Text>
+      <LinkCard
+        icon="📦"
+        title="NPM Package"
+        subtitle="npmjs.com/package/react-native-easy-biometrics"
+        url="https://www.npmjs.com/package/react-native-easy-biometrics"
+      />
+      <LinkCard
+        icon="🐙"
+        title="GitHub Repository"
+        subtitle="github.com/tugayoktayokay/react-native-easy-biometrics"
+        url="https://github.com/tugayoktayokay/react-native-easy-biometrics"
+      />
+      <LinkCard
+        icon="📖"
+        title="Documentation"
+        subtitle="README & API Reference"
+        url="https://github.com/tugayoktayokay/react-native-easy-biometrics#readme"
+      />
+      <LinkCard
+        icon="🐛"
+        title="Report an Issue"
+        subtitle="Bug reports & feature requests"
+        url="https://github.com/tugayoktayokay/react-native-easy-biometrics/issues"
+      />
+
+      {/* Features */}
+      <Text style={[about.sectionTitle, { marginTop: 8 }]}>FEATURES</Text>
+      <View style={about.featureCard}>
+        {features.map((f, i) => (
+          <View key={i} style={about.featureRow}>
+            <Text style={about.featureIcon}>{f.icon}</Text>
+            <Text style={about.featureLabel}>{f.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Tech Stack */}
+      <Text style={[about.sectionTitle, { marginTop: 8 }]}>COMPATIBILITY</Text>
+      <View style={about.featureCard}>
+        <View style={about.featureRow}>
+          <Text style={about.featureIcon}>📱</Text>
+          <Text style={about.featureLabel}>iOS 13+ · Android API 23+</Text>
+        </View>
+        <View style={about.featureRow}>
+          <Text style={about.featureIcon}>⚛️</Text>
+          <Text style={about.featureLabel}>React Native 0.70+</Text>
+        </View>
+        <View style={about.featureRow}>
+          <Text style={about.featureIcon}>🚀</Text>
+          <Text style={about.featureLabel}>Expo SDK 49+</Text>
+        </View>
+        <View style={about.featureRow}>
+          <Text style={about.featureIcon}>⚡</Text>
+          <Text style={about.featureLabel}>Old & New Architecture</Text>
+        </View>
+      </View>
+
+      {/* Footer */}
+      <Text style={about.footer}>Made with ❤️ by Tugay Oktay</Text>
+      <Text style={about.footerSub}>MIT License</Text>
+
+      <View style={{ height: 40 }} />
+    </ScrollView>
+  );
+}
+
+const about = StyleSheet.create({
+  content: { padding: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40 },
+  hero: { alignItems: 'center', marginBottom: 28 },
+  heroIcon: { fontSize: 56, marginBottom: 8 },
+  heroTitle: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#f1f5f9',
+    letterSpacing: -0.5,
+  },
+  heroVersion: {
+    fontSize: 14,
+    color: '#818cf8',
+    fontWeight: '700',
+    marginTop: 4,
+    backgroundColor: 'rgba(99,102,241,0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  heroDesc: {
+    fontSize: 15,
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 22,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748b',
+    letterSpacing: 1.5,
+    marginBottom: 12,
+  },
+  featureCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 12,
+  },
+  featureIcon: { fontSize: 18, width: 28, textAlign: 'center' },
+  featureLabel: { fontSize: 14, color: '#cbd5e1', flex: 1 },
+  footer: {
+    textAlign: 'center',
+    color: '#64748b',
+    fontSize: 14,
+    marginTop: 20,
+    fontWeight: '600',
+  },
+  footerSub: {
+    textAlign: 'center',
+    color: '#475569',
+    fontSize: 12,
+    marginTop: 4,
+  },
+});
+
+// ─── Features Screen ───────────────────────────────────────────
+
+function FeaturesScreen() {
   const {
     available,
     biometryType,
     isEnrolled,
     isAuthenticating,
-    loading,
     authenticate,
     cancel,
   } = useBiometrics();
 
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [authResult, setAuthResult] = useState<ResultState>(INITIAL);
+  const [sensorResult, setSensorResult] = useState<ResultState>(INITIAL);
+  const [cryptoResult, setCryptoResult] = useState<ResultState>(INITIAL);
+  const [changeResult, setChangeResult] = useState<ResultState>(INITIAL);
+  const [storageResult, setStorageResult] = useState<ResultState>(INITIAL);
+  const [screenResult, setScreenResult] = useState<ResultState>(INITIAL);
+  const [diagResult, setDiagResult] = useState<ResultState>(INITIAL);
+  const [integrityResult, setIntegrityResult] = useState<ResultState>(INITIAL);
   const [savedHash, setSavedHash] = useState<string | null>(null);
   const [screenProtected, setScreenProtected] = useState(false);
-
-  const addLog = (text: string, type: LogEntry['type'] = 'info') => {
-    setLogs((prev) => [{ id: ++logId, text, type }, ...prev].slice(0, 20));
-  };
 
   const getBiometryIcon = () => {
     switch (biometryType) {
       case BiometryType.FACE_ID:
-        return '😊';
+        return '🔐';
       case BiometryType.TOUCH_ID:
         return '👆';
       case BiometryType.FINGERPRINT:
@@ -54,316 +501,584 @@ export default function App() {
       case BiometryType.IRIS:
         return '👁️';
       default:
-        return '❌';
+        return '⚠️';
     }
   };
 
-  const handleAuthenticate = async () => {
-    addLog('Starting authentication...');
+  // ── Handlers ──
+
+  const handleAuth = async () => {
+    setAuthResult({ status: 'loading' });
     const result = await authenticate({
       promptTitle: 'Verify Identity',
       promptMessage: 'Authenticate to continue',
       cancelButtonText: 'Cancel',
       disableDeviceFallback: false,
     });
-
-    if (result.success) {
-      addLog('✅ Authentication successful!', 'success');
-    } else {
-      addLog(`❌ Failed: ${result.error} — ${result.message}`, 'error');
-    }
+    setAuthResult(
+      result.success
+        ? { status: 'success', data: { authenticated: true } }
+        : { status: 'error', error: `${result.error}: ${result.message}` }
+    );
   };
 
-  const handleAuthWithCancel = async () => {
-    const controller = new AbortController();
-    addLog('Auth started — will auto-cancel in 3s...');
-
-    setTimeout(() => {
-      controller.abort();
-      addLog('⏱️ Auto-cancelled via AbortSignal');
-    }, 3000);
-
-    const result = await authenticate({
-      promptTitle: 'Quick Auth',
-      promptMessage: 'You have 3 seconds!',
-      signal: controller.signal,
-      disableDeviceFallback: true,
-    });
-
-    if (result.success) {
-      addLog('✅ Authenticated before timeout!', 'success');
-    } else {
-      addLog(`Cancelled: ${result.error}`, 'error');
-    }
-  };
-
-  const handleGetSensorInfo = async () => {
-    const sensor = await RNBiometrics.getBiometryType();
-    addLog(`Primary: ${sensor.biometryType}`);
-    addLog(`All types: ${sensor.biometryTypes.join(', ') || 'None'}`);
-  };
-
-  const handleCheckEnrolled = async () => {
-    const enrolled = await RNBiometrics.isEnrolled();
-    addLog(`Enrolled: ${enrolled}`);
-  };
-
-  const handleSecurityLevel = async () => {
-    const level = await RNBiometrics.getSecurityLevel();
-    const labels = ['NONE', 'SECRET', 'BIOMETRIC_WEAK', 'BIOMETRIC_STRONG'];
-    addLog(`Security Level: ${labels[level]} (${level})`);
-  };
-
-  const handleCreateKeys = async () => {
-    addLog('Generating RSA 2048 key pair...');
-    try {
-      const result = await RNBiometrics.createKeys();
-      addLog(
-        `🔑 Public key: ${result.publicKey.substring(0, 40)}...`,
-        'success'
-      );
-    } catch (e: any) {
-      addLog(`Key generation failed: ${e.message}`, 'error');
-    }
-  };
-
-  const handleSign = async () => {
-    addLog('Signing payload...');
-    const result = await RNBiometrics.createSignature({
-      payload: 'Hello from Easy Biometrics!',
-      promptMessage: 'Sign this message',
-    });
-    if (result.success) {
-      addLog(
-        `✍️ Signature: ${result.signature?.substring(0, 40)}...`,
-        'success'
-      );
-    } else {
-      addLog(`Sign failed: ${result.error}`, 'error');
-    }
-  };
-
-  const handleCheckKeys = async () => {
-    const exists = await RNBiometrics.biometricKeysExist();
-    addLog(`Keys exist: ${exists}`);
-  };
-
-  const handleDeleteKeys = async () => {
-    const deleted = await RNBiometrics.deleteKeys();
-    addLog(deleted ? '🗑️ Keys deleted' : 'No keys to delete');
-  };
-
-  // ─── New Feature Handlers ───────────────────────────────────
-
-  const handleGetStateHash = async () => {
-    const hash = await RNBiometrics.getBiometricStateHash();
-    if (hash) {
-      setSavedHash(hash);
-      addLog(`📋 State hash: ${hash.substring(0, 20)}...`, 'success');
-      addLog('Hash saved — add/remove a fingerprint, then check again');
-    } else {
-      addLog('No biometric state available', 'error');
-    }
-  };
-
-  const handleCheckBiometricChanged = async () => {
-    if (!savedHash) {
-      addLog('No saved hash — tap Get State Hash first', 'error');
-      return;
-    }
-    const changed = await RNBiometrics.isBiometricChanged(savedHash);
-    if (changed) {
-      addLog('⚠️ Biometrics CHANGED since last check!', 'error');
-    } else {
-      addLog('✅ Biometrics unchanged', 'success');
-    }
-  };
-
-  const handleAuthWithSubtitle = async () => {
-    addLog('Auth with subtitle...');
+  const handleAuthSubtitle = async () => {
+    setAuthResult({ status: 'loading' });
     const result = await authenticate({
       promptTitle: 'Confirm Payment',
       promptMessage: 'Authenticate to confirm',
       promptSubtitle: '$99.99 — Apple Store',
       disableDeviceFallback: true,
     });
-    if (result.success) {
-      addLog('✅ Payment confirmed!', 'success');
-    } else {
-      addLog(`❌ ${result.error}`, 'error');
-    }
+    setAuthResult(
+      result.success
+        ? {
+            status: 'success',
+            data: { authenticated: true, prompt: 'subtitle' },
+          }
+        : { status: 'error', error: result.error }
+    );
   };
 
-  const handleCreatePaymentKey = async () => {
-    addLog('Creating payment key...');
-    try {
-      const result = await RNBiometrics.createKeys('payment');
-      addLog(
-        `🔑 Payment key: ${result.publicKey.substring(0, 30)}...`,
-        'success'
-      );
-    } catch (e: any) {
-      addLog(`Failed: ${e.message}`, 'error');
-    }
-  };
-
-  const handleSignWithPaymentKey = async () => {
-    addLog('Signing with payment key...');
-    const result = await RNBiometrics.createSignature({
-      payload: 'payment:99.99:USD',
-      promptMessage: 'Sign payment',
-      keyAlias: 'payment',
+  const handleAutoCancel = async () => {
+    const controller = new AbortController();
+    setAuthResult({ status: 'loading' });
+    setTimeout(() => controller.abort(), 3000);
+    const result = await authenticate({
+      promptTitle: 'Quick Auth',
+      promptMessage: 'You have 3 seconds!',
+      signal: controller.signal,
+      disableDeviceFallback: true,
     });
-    if (result.success) {
-      addLog(
-        `✍️ Payment sig: ${result.signature?.substring(0, 30)}...`,
-        'success'
-      );
-    } else {
-      addLog(`Sign failed: ${result.error}`, 'error');
-    }
+    setAuthResult(
+      result.success
+        ? {
+            status: 'success',
+            data: { authenticated: true, mode: 'before-timeout' },
+          }
+        : { status: 'error', error: result.error }
+    );
   };
 
-  const handleCheckPaymentKey = async () => {
-    const exists = await RNBiometrics.biometricKeysExist('payment');
-    addLog(`Payment key exists: ${exists}`);
-  };
-
-  const handleDeletePaymentKey = async () => {
-    const deleted = await RNBiometrics.deleteKeys('payment');
-    addLog(deleted ? '🗑️ Payment key deleted' : 'No payment key to delete');
-  };
-
-  // ─── v3.0.0 Feature Handlers ───────────────────────────────
-
-  const handleCreateEC256Key = async () => {
-    addLog('Generating EC256 key (Secure Enclave/StrongBox)...');
+  const handleSensorInfo = async () => {
+    setSensorResult({ status: 'loading' });
     try {
-      const result = await RNBiometrics.createKeys('ec256test', KeyType.EC256);
-      addLog(
-        `🔑 EC256 key (${result.keyType}): ${result.publicKey.substring(0, 40)}...`,
-        'success'
-      );
+      const sensor = await RNBiometrics.getBiometryType();
+      const level = await RNBiometrics.getSecurityLevel();
+      const enrolled = await RNBiometrics.isEnrolled();
+      const labels = ['NONE', 'SECRET', 'BIOMETRIC_WEAK', 'BIOMETRIC_STRONG'];
+      setSensorResult({
+        status: 'success',
+        data: {
+          biometryType: sensor.biometryType,
+          allTypes: sensor.biometryTypes.join(', ') || '—',
+          enrolled,
+          securityLevel: `${labels[level]} (${level})`,
+          platform: Platform.OS,
+        },
+      });
     } catch (e: any) {
-      addLog(`EC256 key failed: ${e.message}`, 'error');
+      setSensorResult({ status: 'error', error: e.message });
     }
   };
 
-  const handleDeviceIntegrity = async () => {
-    addLog('Checking device integrity...');
+  const handleCreateKeys = async (type: 'rsa' | 'ec256') => {
+    setCryptoResult({ status: 'loading' });
     try {
-      const result = await RNBiometrics.getDeviceIntegrity();
-      addLog(
-        `Risk Level: ${result.riskLevel}`,
-        result.riskLevel === 'NONE' ? 'success' : 'error'
-      );
-      if (Platform.OS === 'android') {
-        addLog(
-          `Rooted: ${result.isRooted}, SecureHW: ${result.hasSecureHardware}, Keyguard: ${result.isKeyguardSecure}`
-        );
+      const alias = type === 'ec256' ? 'ec256test' : 'default';
+      const keyType = type === 'ec256' ? KeyType.EC256 : undefined;
+      const result = await RNBiometrics.createKeys(alias, keyType);
+      setCryptoResult({
+        status: 'success',
+        data: {
+          keyType: result.keyType,
+          alias,
+          publicKey: result.publicKey.substring(0, 50) + '…',
+        },
+      });
+    } catch (e: any) {
+      setCryptoResult({ status: 'error', error: e.message });
+    }
+  };
+
+  const handleSign = async () => {
+    setCryptoResult({ status: 'loading' });
+    const result = await RNBiometrics.createSignature({
+      payload: 'Hello from Easy Biometrics!',
+      promptMessage: 'Sign this message',
+    });
+    setCryptoResult(
+      result.success
+        ? {
+            status: 'success',
+            data: {
+              signed: true,
+              signature: (result.signature ?? '').substring(0, 50) + '…',
+            },
+          }
+        : { status: 'error', error: result.error }
+    );
+  };
+
+  const handleKeysExist = async () => {
+    setCryptoResult({ status: 'loading' });
+    const exists = await RNBiometrics.biometricKeysExist();
+    setCryptoResult({ status: 'success', data: { keysExist: exists } });
+  };
+
+  const handleDeleteKeys = async () => {
+    setCryptoResult({ status: 'loading' });
+    const deleted = await RNBiometrics.deleteKeys();
+    setCryptoResult(
+      deleted
+        ? { status: 'success', data: { deleted: true } }
+        : { status: 'error', error: 'No keys to delete' }
+    );
+  };
+
+  const handleGetHash = async () => {
+    setChangeResult({ status: 'loading' });
+    try {
+      const hash = await RNBiometrics.getBiometricStateHash();
+      if (hash) {
+        setSavedHash(hash);
+        setChangeResult({
+          status: 'success',
+          data: { hash: hash.substring(0, 32) + '…', saved: true },
+        });
       } else {
-        addLog(
-          `Jailbroken: ${result.isJailbroken}, SecureEnclave: ${result.hasSecureEnclave}`
-        );
+        setChangeResult({
+          status: 'error',
+          error: 'No biometric state available',
+        });
       }
     } catch (e: any) {
-      addLog(`Integrity check failed: ${e.message}`, 'error');
+      setChangeResult({ status: 'error', error: e.message });
     }
+  };
+
+  const handleCheckChanged = async () => {
+    if (!savedHash) {
+      setChangeResult({ status: 'error', error: 'Tap "Get Hash" first' });
+      return;
+    }
+    setChangeResult({ status: 'loading' });
+    const changed = await RNBiometrics.isBiometricChanged(savedHash);
+    setChangeResult({
+      status: changed ? 'error' : 'success',
+      data: { changed, savedHash: savedHash.substring(0, 20) + '…' },
+      error: changed ? 'Biometrics CHANGED!' : undefined,
+    });
   };
 
   const handleSecureStore = async () => {
-    addLog('Storing encrypted data...');
+    setStorageResult({ status: 'loading' });
     try {
       await RNBiometrics.secureStore(
         'test_token',
         'my-secret-jwt-token-12345',
-        'Authenticate to save token'
+        'Authenticate to save'
       );
-      addLog('✅ Token stored securely!', 'success');
+      setStorageResult({
+        status: 'success',
+        data: { key: 'test_token', stored: true },
+      });
     } catch (e: any) {
-      addLog(`Store failed: ${e.message}`, 'error');
+      setStorageResult({ status: 'error', error: e.message });
     }
   };
 
   const handleSecureGet = async () => {
-    addLog('Retrieving encrypted data...');
+    setStorageResult({ status: 'loading' });
     try {
       const value = await RNBiometrics.secureGet(
         'test_token',
-        'Authenticate to retrieve token'
+        'Authenticate to retrieve'
       );
-      if (value) {
-        addLog(`🔓 Retrieved: ${value}`, 'success');
-      } else {
-        addLog('No value found for key "test_token"', 'error');
-      }
+      setStorageResult(
+        value
+          ? { status: 'success', data: { key: 'test_token', value } }
+          : { status: 'error', error: 'No value found' }
+      );
     } catch (e: any) {
-      addLog(`Retrieve failed: ${e.message}`, 'error');
+      setStorageResult({ status: 'error', error: e.message });
     }
   };
 
   const handleSecureDelete = async () => {
+    setStorageResult({ status: 'loading' });
     try {
-      const deleted = await RNBiometrics.secureDelete('test_token');
-      addLog(deleted ? '🗑️ Token deleted' : 'No token to delete');
+      const d = await RNBiometrics.secureDelete('test_token');
+      setStorageResult({
+        status: 'success',
+        data: { key: 'test_token', deleted: d },
+      });
     } catch (e: any) {
-      addLog(`Delete failed: ${e.message}`, 'error');
+      setStorageResult({ status: 'error', error: e.message });
     }
   };
 
-  const handleSecureListKeys = async () => {
+  const handleListKeys = async () => {
+    setStorageResult({ status: 'loading' });
     try {
       const keys = await RNBiometrics.secureGetAllKeys();
-      addLog(`📋 Stored keys: [${keys.join(', ') || 'empty'}]`);
+      setStorageResult({
+        status: 'success',
+        data: { count: keys.length, keys: keys.join(', ') || '(empty)' },
+      });
     } catch (e: any) {
-      addLog(`List failed: ${e.message}`, 'error');
+      setStorageResult({ status: 'error', error: e.message });
     }
   };
 
-  const handleToggleScreenProtection = async () => {
-    const newState = !screenProtected;
-    addLog(
-      `${newState ? 'Enabling' : 'Disabling'} screen capture protection...`
-    );
+  const handleToggleScreen = async () => {
+    const ns = !screenProtected;
+    setScreenResult({ status: 'loading' });
     try {
-      await RNBiometrics.setScreenCaptureProtection(newState);
-      setScreenProtected(newState);
-      addLog(
-        newState
-          ? '🛡️ Screen capture BLOCKED — try taking a screenshot!'
-          : '📸 Screen capture allowed',
-        'success'
-      );
+      await RNBiometrics.setScreenCaptureProtection(ns);
+      setScreenProtected(ns);
+      setScreenResult({
+        status: 'success',
+        data: {
+          protected: ns,
+          note: ns ? 'Try taking a screenshot!' : 'Screenshots allowed',
+        },
+      });
     } catch (e: any) {
-      addLog(`Screen protection failed: ${e.message}`, 'error');
+      setScreenResult({ status: 'error', error: e.message });
     }
   };
 
   const handleDiagnostics = async () => {
-    addLog('Getting diagnostic info...');
+    setDiagResult({ status: 'loading' });
     try {
-      const info = await RNBiometrics.getDiagnosticInfo();
-      addLog(`Platform: ${info.platform} ${info.osVersion}`, 'success');
-      addLog(`Device: ${info.device} (${info.model})`);
-      if (info.platform === 'ios') {
-        addLog(
-          `FaceID: ${info.hasFaceID}, TouchID: ${info.hasTouchID}, SE: ${info.hasSecureEnclave}`
-        );
-      } else {
-        addLog(
-          `Strong: ${info.hasBiometricStrong}, FP: ${info.hasFingerprint}, Face: ${info.hasFaceDetect}`
-        );
-        addLog(`StrongBox: ${info.hasStrongBox}, SDK: ${info.sdkVersion}`);
-      }
+      const i = await RNBiometrics.getDiagnosticInfo();
+      setDiagResult({
+        status: 'success',
+        data:
+          i.platform === 'ios'
+            ? {
+                platform: `${i.platform} ${i.osVersion}`,
+                device: `${i.device} (${i.model})`,
+                faceID: i.hasFaceID,
+                touchID: i.hasTouchID,
+                secureEnclave: i.hasSecureEnclave,
+                passcode: i.hasPasscode,
+              }
+            : {
+                platform: `${i.platform} SDK ${i.sdkVersion}`,
+                device: `${i.device} (${i.brand})`,
+                fingerprint: i.hasFingerprint,
+                faceDetect: i.hasFaceDetect,
+                strongBio: i.hasBiometricStrong,
+                strongBox: i.hasStrongBox,
+              },
+      });
     } catch (e: any) {
-      addLog(`Diagnostics failed: ${e.message}`, 'error');
+      setDiagResult({ status: 'error', error: e.message });
     }
   };
 
+  const handleIntegrity = async () => {
+    setIntegrityResult({ status: 'loading' });
+    try {
+      const r = await RNBiometrics.getDeviceIntegrity();
+      setIntegrityResult({
+        status: r.riskLevel === 'NONE' ? 'success' : 'error',
+        data:
+          Platform.OS === 'ios'
+            ? {
+                riskLevel: r.riskLevel,
+                jailbroken: r.isJailbroken,
+                secureEnclave: r.hasSecureEnclave,
+              }
+            : {
+                riskLevel: r.riskLevel,
+                rooted: r.isRooted,
+                secureHW: r.hasSecureHardware,
+                keyguard: r.isKeyguardSecure,
+              },
+        error: r.riskLevel !== 'NONE' ? `Risk: ${r.riskLevel}` : undefined,
+      });
+    } catch (e: any) {
+      setIntegrityResult({ status: 'error', error: e.message });
+    }
+  };
+
+  return (
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={{
+        padding: 20,
+        paddingTop: Platform.OS === 'ios' ? 60 : 40,
+      }}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.logo}>Easy Biometrics</Text>
+        <View style={styles.versionBadge}>
+          <Text style={styles.versionText}>v3.0</Text>
+        </View>
+      </View>
+
+      {/* Status */}
+      <View style={styles.statusPill}>
+        <Text style={{ fontSize: 32 }}>{getBiometryIcon()}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.statusType}>{biometryType || 'None'}</Text>
+          <Text style={styles.statusMeta}>
+            {available ? '● Available' : '○ Unavailable'} ·{' '}
+            {isEnrolled ? 'Enrolled' : 'Not enrolled'} · {Platform.OS}
+          </Text>
+        </View>
+      </View>
+
+      {/* Auth */}
+      <FeatureCard title="🔓 Authentication">
+        <ActionButton
+          label={isAuthenticating ? 'Authenticating…' : 'Authenticate'}
+          icon="🔐"
+          onPress={handleAuth}
+          disabled={isAuthenticating}
+        />
+        <ButtonRow>
+          <SmallButton
+            label="With Subtitle"
+            icon="💳"
+            onPress={handleAuthSubtitle}
+          />
+          <SmallButton
+            label="3s Auto-Cancel"
+            icon="⏱️"
+            onPress={handleAutoCancel}
+          />
+        </ButtonRow>
+        {isAuthenticating && (
+          <ActionButton
+            label="Cancel"
+            icon="✋"
+            onPress={cancel}
+            color="#dc2626"
+            compact
+          />
+        )}
+        <ResultBox result={authResult} />
+      </FeatureCard>
+
+      {/* Sensor */}
+      <FeatureCard title="📱 Sensor & Capabilities">
+        <ActionButton
+          label="Query Sensor Info"
+          icon="🔍"
+          onPress={handleSensorInfo}
+          color="#0891b2"
+        />
+        <ResultBox result={sensorResult} />
+      </FeatureCard>
+
+      {/* Crypto */}
+      <FeatureCard title="🔑 Crypto Keys" badge="RSA + EC256">
+        <ButtonRow>
+          <SmallButton
+            label="RSA 2048"
+            icon="🔑"
+            onPress={() => handleCreateKeys('rsa')}
+            color="#0d9488"
+          />
+          <SmallButton
+            label="EC256 (SE)"
+            icon="🔑"
+            onPress={() => handleCreateKeys('ec256')}
+            color="#0d9488"
+          />
+        </ButtonRow>
+        <ActionButton
+          label="Sign Payload"
+          icon="✍️"
+          onPress={handleSign}
+          color="#7c3aed"
+        />
+        <ButtonRow>
+          <SmallButton
+            label="Keys Exist?"
+            icon="🔍"
+            onPress={handleKeysExist}
+          />
+          <SmallButton
+            label="Delete Keys"
+            icon="🗑️"
+            onPress={handleDeleteKeys}
+            color="#7f1d1d"
+          />
+        </ButtonRow>
+        <ResultBox result={cryptoResult} />
+      </FeatureCard>
+
+      {/* Change Detection */}
+      <FeatureCard title="🔄 Change Detection">
+        <ButtonRow>
+          <SmallButton
+            label="Get Hash"
+            icon="📋"
+            onPress={handleGetHash}
+            color="#0d9488"
+          />
+          <SmallButton
+            label="Check Changed"
+            icon="🔄"
+            onPress={handleCheckChanged}
+            color="#d97706"
+          />
+        </ButtonRow>
+        <ResultBox result={changeResult} />
+      </FeatureCard>
+
+      {/* Storage */}
+      <FeatureCard title="🔐 Encrypted Storage" badge="Keychain">
+        <ButtonRow>
+          <SmallButton
+            label="Store"
+            icon="💾"
+            onPress={handleSecureStore}
+            color="#4f46e5"
+          />
+          <SmallButton
+            label="Retrieve"
+            icon="🔓"
+            onPress={handleSecureGet}
+            color="#4f46e5"
+          />
+        </ButtonRow>
+        <ButtonRow>
+          <SmallButton label="List Keys" icon="📋" onPress={handleListKeys} />
+          <SmallButton
+            label="Delete"
+            icon="🗑️"
+            onPress={handleSecureDelete}
+            color="#7f1d1d"
+          />
+        </ButtonRow>
+        <ResultBox result={storageResult} />
+      </FeatureCard>
+
+      {/* Screen */}
+      <FeatureCard title="📸 Screen Capture Protection">
+        <ActionButton
+          label={screenProtected ? 'Disable Protection' : 'Enable Protection'}
+          icon={screenProtected ? '🔓' : '🛡️'}
+          onPress={handleToggleScreen}
+          color={screenProtected ? '#dc2626' : '#0d9488'}
+        />
+        <ResultBox result={screenResult} />
+      </FeatureCard>
+
+      {/* Integrity */}
+      <FeatureCard title="🛡️ Device Integrity">
+        <ActionButton
+          label="Check Integrity"
+          icon="🔍"
+          onPress={handleIntegrity}
+          color="#d97706"
+        />
+        <ResultBox result={integrityResult} />
+      </FeatureCard>
+
+      {/* Diagnostics */}
+      <FeatureCard title="📊 Diagnostics">
+        <ActionButton
+          label="Get Diagnostic Info"
+          icon="📊"
+          onPress={handleDiagnostics}
+          color="#6366f1"
+        />
+        <ResultBox result={diagResult} />
+      </FeatureCard>
+
+      <View style={{ height: 100 }} />
+    </ScrollView>
+  );
+}
+
+// ─── Tab Bar ───────────────────────────────────────────────────
+
+function TabBar({
+  active,
+  onTabPress,
+}: {
+  active: string;
+  onTabPress: (tab: string) => void;
+}) {
+  const tabs = [
+    { key: 'features', icon: '⚡', label: 'Features' },
+    { key: 'about', icon: '📖', label: 'About' },
+  ];
+
+  return (
+    <View style={tb.bar}>
+      {tabs.map((tab) => {
+        const isActive = active === tab.key;
+        return (
+          <TouchableOpacity
+            key={tab.key}
+            style={tb.tab}
+            onPress={() => onTabPress(tab.key)}
+            activeOpacity={0.7}
+          >
+            <Text style={[tb.tabIcon, isActive && tb.tabIconActive]}>
+              {tab.icon}
+            </Text>
+            <Text style={[tb.tabLabel, isActive && tb.tabLabelActive]}>
+              {tab.label}
+            </Text>
+            {isActive && <View style={tb.indicator} />}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+const tb = StyleSheet.create({
+  bar: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(15,15,30,0.95)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+    paddingTop: 8,
+  },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+    position: 'relative',
+  },
+  tabIcon: { fontSize: 22, opacity: 0.4 },
+  tabIconActive: { opacity: 1 },
+  tabLabel: { fontSize: 11, color: '#64748b', marginTop: 2, fontWeight: '600' },
+  tabLabelActive: { color: '#818cf8' },
+  indicator: {
+    position: 'absolute',
+    top: 0,
+    width: 20,
+    height: 2,
+    backgroundColor: '#818cf8',
+    borderRadius: 1,
+  },
+});
+
+// ─── Main App ──────────────────────────────────────────────────
+
+export default function App() {
+  const { loading } = useBiometrics();
+  const [activeTab, setActiveTab] = useState('features');
+
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.loading}>Loading biometrics...</Text>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#818cf8" />
+        <Text style={styles.loadingText}>Initializing…</Text>
       </View>
     );
   }
@@ -371,420 +1086,55 @@ export default function App() {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Easy Biometrics</Text>
-          <Text style={styles.subtitle}>v3.0 Demo</Text>
-        </View>
-
-        {/* Status Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Device Status</Text>
-          <View style={styles.statusRow}>
-            <Text style={styles.statusIcon}>{getBiometryIcon()}</Text>
-            <View>
-              <Text style={styles.statusText}>
-                {biometryType} — {available ? 'Available' : 'Not Available'}
-              </Text>
-              <Text style={styles.statusSubtext}>
-                Enrolled: {isEnrolled ? 'Yes' : 'No'} · Platform: {Platform.OS}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Auth Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Authentication</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.primaryButton]}
-            onPress={handleAuthenticate}
-            disabled={isAuthenticating}
-          >
-            <Text style={styles.buttonText}>
-              {isAuthenticating ? 'Authenticating...' : '🔓 Authenticate'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.warningButton]}
-            onPress={handleAuthWithCancel}
-          >
-            <Text style={styles.buttonText}>⏱️ Auth with 3s Auto-Cancel</Text>
-          </TouchableOpacity>
-          {isAuthenticating && (
-            <TouchableOpacity
-              style={[styles.button, styles.dangerButton]}
-              onPress={cancel}
-            >
-              <Text style={styles.buttonText}>✋ Cancel Now</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Detection Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Detection</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={handleGetSensorInfo}
-          >
-            <Text style={styles.buttonText}>📱 Get Sensor Info</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={handleCheckEnrolled}
-          >
-            <Text style={styles.buttonText}>👤 Check Enrolled</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={handleSecurityLevel}
-          >
-            <Text style={styles.buttonText}>🛡️ Security Level</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Crypto Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Crypto Keys</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.cryptoButton]}
-            onPress={handleCreateKeys}
-          >
-            <Text style={styles.buttonText}>🔑 Create Keys</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.cryptoButton]}
-            onPress={handleSign}
-          >
-            <Text style={styles.buttonText}>✍️ Sign Payload</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.cryptoButton]}
-            onPress={handleCheckKeys}
-          >
-            <Text style={styles.buttonText}>🔍 Keys Exist?</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.dangerButton]}
-            onPress={handleDeleteKeys}
-          >
-            <Text style={styles.buttonText}>🗑️ Delete Keys</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Biometric Change Detection */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Biometric Change Detection</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={handleGetStateHash}
-          >
-            <Text style={styles.buttonText}>📋 Get State Hash</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={handleCheckBiometricChanged}
-          >
-            <Text style={styles.buttonText}>🔄 Check If Changed</Text>
-          </TouchableOpacity>
-          {savedHash && (
-            <Text style={styles.hashText}>
-              Saved: {savedHash.substring(0, 16)}...
-            </Text>
-          )}
-        </View>
-
-        {/* Subtitle Auth */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Subtitle Auth (Android)</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.primaryButton]}
-            onPress={handleAuthWithSubtitle}
-          >
-            <Text style={styles.buttonText}>💳 Auth with Subtitle</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Multi-Alias Keys */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Multi-Alias Keys</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.cryptoButton]}
-            onPress={handleCreatePaymentKey}
-          >
-            <Text style={styles.buttonText}>🔑 Create Payment Key</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.cryptoButton]}
-            onPress={handleSignWithPaymentKey}
-          >
-            <Text style={styles.buttonText}>✍️ Sign with Payment Key</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={handleCheckPaymentKey}
-          >
-            <Text style={styles.buttonText}>🔍 Payment Key Exists?</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.dangerButton]}
-            onPress={handleDeletePaymentKey}
-          >
-            <Text style={styles.buttonText}>🗑️ Delete Payment Key</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* EC256 Keys */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🔑 EC256 Keys (v3.0)</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.cryptoButton]}
-            onPress={handleCreateEC256Key}
-          >
-            <Text style={styles.buttonText}>🔑 Create EC256 Key</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Device Integrity */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🛡️ Device Integrity (v3.0)</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.warningButton]}
-            onPress={handleDeviceIntegrity}
-          >
-            <Text style={styles.buttonText}>🔍 Check Device Integrity</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Encrypted Storage */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🔐 Encrypted Storage (v3.0)</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.primaryButton]}
-            onPress={handleSecureStore}
-          >
-            <Text style={styles.buttonText}>💾 Store Token</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.primaryButton]}
-            onPress={handleSecureGet}
-          >
-            <Text style={styles.buttonText}>🔓 Retrieve Token</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={handleSecureListKeys}
-          >
-            <Text style={styles.buttonText}>📋 List All Keys</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.dangerButton]}
-            onPress={handleSecureDelete}
-          >
-            <Text style={styles.buttonText}>🗑️ Delete Token</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Screen Capture Protection */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📸 Screen Capture (v3.0)</Text>
-          <TouchableOpacity
-            style={[
-              styles.button,
-              screenProtected ? styles.dangerButton : styles.cryptoButton,
-            ]}
-            onPress={handleToggleScreenProtection}
-          >
-            <Text style={styles.buttonText}>
-              {screenProtected
-                ? '🔓 Disable Protection'
-                : '🛡️ Enable Protection'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Diagnostics */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🔍 Diagnostics (v3.0)</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={handleDiagnostics}
-          >
-            <Text style={styles.buttonText}>📊 Get Diagnostic Info</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Logs */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Logs</Text>
-          {logs.length === 0 && (
-            <Text style={styles.emptyLog}>
-              Tap a button to see results here
-            </Text>
-          )}
-          {logs.map((log) => (
-            <View
-              key={log.id}
-              style={[
-                styles.logItem,
-                log.type === 'success' && styles.logSuccess,
-                log.type === 'error' && styles.logError,
-              ]}
-            >
-              <Text style={styles.logText}>{log.text}</Text>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
+      {activeTab === 'features' ? <FeaturesScreen /> : <AboutScreen />}
+      <TabBar active={activeTab} onTabPress={setActiveTab} />
     </View>
   );
 }
 
+// ─── Styles ────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
+  container: { flex: 1, backgroundColor: '#0c0c1d' },
+  center: {
     flex: 1,
-    backgroundColor: '#0a0a1a',
-  },
-  loading: {
-    color: '#fff',
-    fontSize: 18,
-    textAlign: 'center',
-    marginTop: 100,
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  header: {
+    backgroundColor: '#0c0c1d',
     alignItems: 'center',
-    marginBottom: 24,
-    marginTop: 20,
+    justifyContent: 'center',
   },
-  title: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: -1,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#888',
-    marginTop: 4,
-  },
-  card: {
-    backgroundColor: '#1a1a2e',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#2a2a4e',
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#888',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
-  statusRow: {
+  loadingText: { color: '#94a3b8', marginTop: 12, fontSize: 15 },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
+    marginBottom: 20,
   },
-  statusIcon: {
-    fontSize: 40,
+  logo: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#f1f5f9',
+    letterSpacing: -0.5,
   },
-  statusText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  statusSubtext: {
-    fontSize: 14,
-    color: '#888',
-    marginTop: 2,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#888',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
-  button: {
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 8,
-    alignItems: 'center',
-  },
-  primaryButton: {
-    backgroundColor: '#4f46e5',
-  },
-  secondaryButton: {
-    backgroundColor: '#1e293b',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  warningButton: {
-    backgroundColor: '#d97706',
-  },
-  dangerButton: {
-    backgroundColor: '#dc2626',
-  },
-  cryptoButton: {
-    backgroundColor: '#0d9488',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  emptyLog: {
-    color: '#555',
-    fontSize: 14,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    padding: 16,
-  },
-  logItem: {
-    backgroundColor: '#1a1a2e',
-    padding: 12,
+  versionBadge: {
+    backgroundColor: 'rgba(99,102,241,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 8,
-    marginBottom: 4,
-    borderLeftWidth: 3,
-    borderLeftColor: '#444',
+    borderWidth: 1,
+    borderColor: 'rgba(99,102,241,0.3)',
   },
-  logSuccess: {
-    borderLeftColor: '#22c55e',
-    backgroundColor: '#0a1f0a',
+  versionText: { color: '#818cf8', fontSize: 13, fontWeight: '700' },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  logError: {
-    borderLeftColor: '#ef4444',
-    backgroundColor: '#1f0a0a',
-  },
-  logText: {
-    color: '#ddd',
-    fontSize: 13,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  hashText: {
-    color: '#666',
-    fontSize: 11,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    marginTop: 4,
-    textAlign: 'center',
-  },
+  statusType: { fontSize: 18, fontWeight: '700', color: '#e2e8f0' },
+  statusMeta: { fontSize: 13, color: '#64748b', marginTop: 2 },
 });
