@@ -13,6 +13,7 @@ import RNBiometrics, {
   BiometryType,
   BiometricError,
   SecurityLevel,
+  KeyType,
 } from 'react-native-easy-biometrics';
 
 type LogEntry = {
@@ -36,6 +37,7 @@ export default function App() {
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [savedHash, setSavedHash] = useState<string | null>(null);
+  const [screenProtected, setScreenProtected] = useState(false);
 
   const addLog = (text: string, type: LogEntry['type'] = 'info') => {
     setLogs((prev) => [{ id: ++logId, text, type }, ...prev].slice(0, 20));
@@ -232,6 +234,132 @@ export default function App() {
     addLog(deleted ? '🗑️ Payment key deleted' : 'No payment key to delete');
   };
 
+  // ─── v3.0.0 Feature Handlers ───────────────────────────────
+
+  const handleCreateEC256Key = async () => {
+    addLog('Generating EC256 key (Secure Enclave/StrongBox)...');
+    try {
+      const result = await RNBiometrics.createKeys('ec256test', KeyType.EC256);
+      addLog(
+        `🔑 EC256 key (${result.keyType}): ${result.publicKey.substring(0, 40)}...`,
+        'success'
+      );
+    } catch (e: any) {
+      addLog(`EC256 key failed: ${e.message}`, 'error');
+    }
+  };
+
+  const handleDeviceIntegrity = async () => {
+    addLog('Checking device integrity...');
+    try {
+      const result = await RNBiometrics.getDeviceIntegrity();
+      addLog(
+        `Risk Level: ${result.riskLevel}`,
+        result.riskLevel === 'NONE' ? 'success' : 'error'
+      );
+      if (Platform.OS === 'android') {
+        addLog(
+          `Rooted: ${result.isRooted}, SecureHW: ${result.hasSecureHardware}, Keyguard: ${result.isKeyguardSecure}`
+        );
+      } else {
+        addLog(
+          `Jailbroken: ${result.isJailbroken}, SecureEnclave: ${result.hasSecureEnclave}`
+        );
+      }
+    } catch (e: any) {
+      addLog(`Integrity check failed: ${e.message}`, 'error');
+    }
+  };
+
+  const handleSecureStore = async () => {
+    addLog('Storing encrypted data...');
+    try {
+      await RNBiometrics.secureStore(
+        'test_token',
+        'my-secret-jwt-token-12345',
+        'Authenticate to save token'
+      );
+      addLog('✅ Token stored securely!', 'success');
+    } catch (e: any) {
+      addLog(`Store failed: ${e.message}`, 'error');
+    }
+  };
+
+  const handleSecureGet = async () => {
+    addLog('Retrieving encrypted data...');
+    try {
+      const value = await RNBiometrics.secureGet(
+        'test_token',
+        'Authenticate to retrieve token'
+      );
+      if (value) {
+        addLog(`🔓 Retrieved: ${value}`, 'success');
+      } else {
+        addLog('No value found for key "test_token"', 'error');
+      }
+    } catch (e: any) {
+      addLog(`Retrieve failed: ${e.message}`, 'error');
+    }
+  };
+
+  const handleSecureDelete = async () => {
+    try {
+      const deleted = await RNBiometrics.secureDelete('test_token');
+      addLog(deleted ? '🗑️ Token deleted' : 'No token to delete');
+    } catch (e: any) {
+      addLog(`Delete failed: ${e.message}`, 'error');
+    }
+  };
+
+  const handleSecureListKeys = async () => {
+    try {
+      const keys = await RNBiometrics.secureGetAllKeys();
+      addLog(`📋 Stored keys: [${keys.join(', ') || 'empty'}]`);
+    } catch (e: any) {
+      addLog(`List failed: ${e.message}`, 'error');
+    }
+  };
+
+  const handleToggleScreenProtection = async () => {
+    const newState = !screenProtected;
+    addLog(
+      `${newState ? 'Enabling' : 'Disabling'} screen capture protection...`
+    );
+    try {
+      await RNBiometrics.setScreenCaptureProtection(newState);
+      setScreenProtected(newState);
+      addLog(
+        newState
+          ? '🛡️ Screen capture BLOCKED — try taking a screenshot!'
+          : '📸 Screen capture allowed',
+        'success'
+      );
+    } catch (e: any) {
+      addLog(`Screen protection failed: ${e.message}`, 'error');
+    }
+  };
+
+  const handleDiagnostics = async () => {
+    addLog('Getting diagnostic info...');
+    try {
+      const info = await RNBiometrics.getDiagnosticInfo();
+      addLog(`Platform: ${info.platform} ${info.osVersion}`, 'success');
+      addLog(`Device: ${info.device} (${info.model})`);
+      if (info.platform === 'ios') {
+        addLog(
+          `FaceID: ${info.hasFaceID}, TouchID: ${info.hasTouchID}, SE: ${info.hasSecureEnclave}`
+        );
+      } else {
+        addLog(
+          `Strong: ${info.hasBiometricStrong}, FP: ${info.hasFingerprint}, Face: ${info.hasFaceDetect}`
+        );
+        addLog(`StrongBox: ${info.hasStrongBox}, SDK: ${info.sdkVersion}`);
+      }
+    } catch (e: any) {
+      addLog(`Diagnostics failed: ${e.message}`, 'error');
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -250,7 +378,7 @@ export default function App() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Easy Biometrics</Text>
-          <Text style={styles.subtitle}>v2.0 Demo</Text>
+          <Text style={styles.subtitle}>v3.0 Demo</Text>
         </View>
 
         {/* Status Card */}
@@ -408,6 +536,86 @@ export default function App() {
             onPress={handleDeletePaymentKey}
           >
             <Text style={styles.buttonText}>🗑️ Delete Payment Key</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* EC256 Keys */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🔑 EC256 Keys (v3.0)</Text>
+          <TouchableOpacity
+            style={[styles.button, styles.cryptoButton]}
+            onPress={handleCreateEC256Key}
+          >
+            <Text style={styles.buttonText}>🔑 Create EC256 Key</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Device Integrity */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🛡️ Device Integrity (v3.0)</Text>
+          <TouchableOpacity
+            style={[styles.button, styles.warningButton]}
+            onPress={handleDeviceIntegrity}
+          >
+            <Text style={styles.buttonText}>🔍 Check Device Integrity</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Encrypted Storage */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🔐 Encrypted Storage (v3.0)</Text>
+          <TouchableOpacity
+            style={[styles.button, styles.primaryButton]}
+            onPress={handleSecureStore}
+          >
+            <Text style={styles.buttonText}>💾 Store Token</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.primaryButton]}
+            onPress={handleSecureGet}
+          >
+            <Text style={styles.buttonText}>🔓 Retrieve Token</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.secondaryButton]}
+            onPress={handleSecureListKeys}
+          >
+            <Text style={styles.buttonText}>📋 List All Keys</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.dangerButton]}
+            onPress={handleSecureDelete}
+          >
+            <Text style={styles.buttonText}>🗑️ Delete Token</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Screen Capture Protection */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📸 Screen Capture (v3.0)</Text>
+          <TouchableOpacity
+            style={[
+              styles.button,
+              screenProtected ? styles.dangerButton : styles.cryptoButton,
+            ]}
+            onPress={handleToggleScreenProtection}
+          >
+            <Text style={styles.buttonText}>
+              {screenProtected
+                ? '🔓 Disable Protection'
+                : '🛡️ Enable Protection'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Diagnostics */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🔍 Diagnostics (v3.0)</Text>
+          <TouchableOpacity
+            style={[styles.button, styles.secondaryButton]}
+            onPress={handleDiagnostics}
+          >
+            <Text style={styles.buttonText}>📊 Get Diagnostic Info</Text>
           </TouchableOpacity>
         </View>
 
