@@ -1,6 +1,6 @@
 {
   "name": "react-native-easy-biometrics",
-  "version": "3.1.0",
+  "version": "3.0.0",
   "description": "Easy-to-use biometric authentication for React Native — Face ID, Touch ID, Fingerprint with typed errors, crypto keys, AbortSignal cancel, React Hook, and Expo support. New Architecture (TurboModules) ready.",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",

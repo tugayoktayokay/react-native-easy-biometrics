@@ -1,9 +1,12 @@
 # Changelog
 
-## [3.1.0] — 2026-02-27
+## [3.0.0] — 2026-02-27
 
 ### Added
 
+- **EC256 key support** — `createKeys(alias, KeyType.EC256)` for Secure Enclave (iOS) / StrongBox (Android)
+- **Device integrity check** — `getDeviceIntegrity()` detects root/jailbreak with risk levels
+- **Biometric event listener** — `onBiometricChange(callback)` for real-time biometric changes
 - **Encrypted biometric storage** — `secureStore()`, `secureGet()`, `secureDelete()`, `secureGetAllKeys()`
   - Android: AES-256-GCM with BiometricPrompt-protected key in AndroidKeyStore
   - iOS: Keychain with `kSecAccessControlBiometryAny` access control
@@ -15,19 +18,11 @@
 - **`useBiometricGuard()` hook** — screen-level auth protection with auto-prompt and retry
 - **GitHub Actions CI** — automated lint, typecheck, build on Node 18/20
 - **CONTRIBUTING.md** — dev setup, PR guidelines, commit conventions
-- `DiagnosticInfo` type with platform-specific fields
-
-## [3.0.0] — 2026-02-27
-
-### Added
-
-- **EC256 key support** — `createKeys(alias, KeyType.EC256)` for Secure Enclave (iOS) / StrongBox (Android)
-- **Device integrity check** — `getDeviceIntegrity()` detects root/jailbreak with risk levels
-- **Biometric event listener** — `onBiometricChange(callback)` for real-time biometric changes
 - **CHANGELOG.md** — Full version history
 - `KeyType` enum (`EC256`, `RSA2048`)
 - `DeviceIntegrityResult` type with `isCompromised`, `riskLevel`
 - `RiskLevel` type (`NONE`, `LOW`, `MEDIUM`, `HIGH`)
+- `DiagnosticInfo` type with platform-specific fields
 - `CreateKeysResult` now returns `keyType`
 - `createSignature` auto-detects EC vs RSA algorithm
 - `deleteKeysWithTag` (iOS) now handles both EC and RSA keys
