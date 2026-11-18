@@ -340,9 +340,16 @@ const authenticate = async (options: AuthOptions): Promise<AuthResult> => {
     throw new Error('promptMessage must be a non-empty string');
   }
 
-  signal?.addEventListener('abort', () =>
-    RNBiometricsNative.cancelBioAuthRequest()
-  );
+  if (signal?.aborted) {
+    return {
+      success: false,
+      error: BiometricError.USER_CANCEL,
+      message: 'Authentication aborted',
+    };
+  }
+
+  const onAbort = () => RNBiometricsNative.cancelBioAuthRequest();
+  signal?.addEventListener('abort', onAbort);
 
   try {
     await RNBiometricsNative.authenticate(
@@ -361,6 +368,8 @@ const authenticate = async (options: AuthOptions): Promise<AuthResult> => {
       error: errorCode as BiometricError,
       message: e.message || 'Authentication failed',
     };
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
 };
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.2
+
+- iOS: `cancelBioAuthRequest` now matches the JS call (no argument); cancelling via `AbortSignal` or `useBiometrics().cancel` works again.
+- iOS: thread-safe `LAContext` handling between authenticate and cancel.
+- iOS: removed the stub TurboModule spec whose methods returned `undefined`; the module runs through the New Architecture interop layer.
+- JS: `authenticate` returns `user_cancel` for an already-aborted signal and removes its abort listener when done.
+- Android: stable `androidx.biometric:biometric:1.1.0`, `namespace` in Gradle, Java 17, no legacy buildscript or unused codegen config.
+
 ## [3.0.0] — 2026-02-27
 
 ### Added

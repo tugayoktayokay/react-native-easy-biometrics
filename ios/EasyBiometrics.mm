@@ -5,10 +5,6 @@
 #import <Security/Security.h>
 #import <sys/utsname.h>
 
-#ifdef RCT_NEW_ARCH_ENABLED
-#import "RNEasyBiometricsSpec.h"
-#endif
-
 static NSString *const kKeychainTagPrefix = @"com.easybiometrics.keys.";
 
 @implementation EasyBiometrics
@@ -191,7 +187,9 @@ RCT_REMAP_METHOD(
   dispatch_async(
       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         LAContext *context = [[LAContext alloc] init];
-        self->_context = context;
+        @synchronized(self) {
+          self->_context = context;
+        }
 
         if (fallbackLabel != nil) {
           if ([fallbackLabel length] == 0) {
@@ -220,7 +218,11 @@ RCT_REMAP_METHOD(
              evaluatePolicy:localAuthPolicy
             localizedReason:message
                       reply:^(BOOL success, NSError *biometricError) {
-                        self->_context = nil;
+                        @synchronized(self) {
+                          if (self->_context == context) {
+                            self->_context = nil;
+                          }
+                        }
 
                         if (success) {
                           resolve(@(YES));
@@ -236,11 +238,13 @@ RCT_REMAP_METHOD(
 
 // ─── cancelBioAuthRequest ──────────────────────────────────────
 
-RCT_REMAP_METHOD(cancelBioAuthRequest, cancelIndex : (NSNumber *)index) {
-  if (!_context)
-    return;
-  [_context invalidate];
-  _context = nil;
+RCT_EXPORT_METHOD(cancelBioAuthRequest) {
+  LAContext *context = nil;
+  @synchronized(self) {
+    context = _context;
+    _context = nil;
+  }
+  [context invalidate];
 }
 
 // ─── Crypto Key Management ─────────────────────────────────────
@@ -920,14 +924,5 @@ RCT_REMAP_METHOD(getDeviceIntegrity,
     return @"unknown";
   }
 }
-
-// ─── TurboModule ───────────────────────────────────────────────
-
-#ifdef RCT_NEW_ARCH_ENABLED
-- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
-    (const facebook::react::ObjCTurboModule::InitParams &)params {
-  return std::make_shared<facebook::react::NativeEasyBiometricsSpecJSI>(params);
-}
-#endif
 
 @end
