@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.0.2
+## 3.0.3
 
 - iOS: `cancelBioAuthRequest` now matches the JS call (no argument); cancelling via `AbortSignal` or `useBiometrics().cancel` works again.
 - iOS: thread-safe `LAContext` handling between authenticate and cancel.
